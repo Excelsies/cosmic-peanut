@@ -521,6 +521,21 @@ async def test_transparency_is_a_shell_setting_and_borderless_persists(
 
 
 @pytest.mark.asyncio
+async def test_background_and_visual_opacity_are_shell_settings_that_persist(host: Host, http):
+    shell = await connect(host, http)
+    hello = await shell.next_json("hello")
+    assert hello["settings"]["backgroundOpacity"] == 0
+    assert hello["settings"]["visualOpacity"] == 1.0
+    await shell.send({"type": "settings", "backgroundOpacity": 0.7, "visualOpacity": 0.4})
+    await asyncio.sleep(0.2)
+    assert host.settings.data["backgroundOpacity"] == 0.7
+    assert host.settings.data["visualOpacity"] == 0.4
+    await shell.send({"type": "settings", "visualOpacity": 0.0})
+    await asyncio.sleep(0.2)
+    assert host.settings.data["visualOpacity"] == 0.4
+
+
+@pytest.mark.asyncio
 async def test_recovery_never_loops(tmp_path: Path, window: FakeWindow, http):
     h = Host(
         root=tmp_path / "home",

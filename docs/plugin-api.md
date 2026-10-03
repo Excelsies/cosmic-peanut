@@ -139,7 +139,9 @@ own rAF loop and don't resize the canvas.
 behind the window when the user turns on *Transparent background*. Clear to transparent
 (`clearRect`, `gl.clearColor(0, 0, 0, 0)`) instead of painting black, and write premultiplied
 color with a meaningful alpha: for glowing, additive looks, `alpha = max(r, g, b)` works well. On
-the black backdrop this looks exactly like an opaque black canvas.
+the black backdrop this looks exactly like an opaque black canvas. With *Transparent background*
+on, the backdrop may be partly opaque black (the user's *Background opacity*), and the user may
+fade the whole visual (*Visual opacity*); the plugin sees neither, and `ctx` is unchanged.
 
 Renderer details:
 

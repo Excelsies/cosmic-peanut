@@ -60,3 +60,56 @@ def test_float_on_top_defaults_on(tmp_path: Path):
     s = Settings(tmp_path / "settings.json")
     assert s.data["onTop"] is True
     assert s.update({"onTop": False}) == {"onTop": False}
+
+
+def test_background_opacity_defaults_to_see_through_and_allows_0_to_1(tmp_path: Path):
+    s = Settings(tmp_path / "settings.json")
+    assert s.data["backgroundOpacity"] == 0
+    assert s.update({"backgroundOpacity": 0.55}) == {"backgroundOpacity": 0.55}
+    assert Settings(tmp_path / "settings.json").data["backgroundOpacity"] == 0.55
+    assert s.update({"backgroundOpacity": 1}) == {"backgroundOpacity": 1}
+    assert s.update({"backgroundOpacity": 0}) == {"backgroundOpacity": 0}
+
+
+def test_visual_opacity_defaults_to_opaque_and_keeps_a_0_1_floor(tmp_path: Path):
+    s = Settings(tmp_path / "settings.json")
+    assert s.data["visualOpacity"] == 1.0
+    assert s.update({"visualOpacity": 0.1}) == {"visualOpacity": 0.1}
+    assert s.update({"visualOpacity": 0}) == {}
+    assert s.update({"visualOpacity": 0.09}) == {}
+
+
+def test_opacities_reject_out_of_range_non_finite_and_non_numbers(tmp_path: Path):
+    s = Settings(tmp_path / "settings.json")
+    for key in ("backgroundOpacity", "visualOpacity"):
+        for bad in (
+            -0.1,
+            1.01,
+            2,
+            float("nan"),
+            float("inf"),
+            10**400,
+            -(10**400),
+            True,
+            False,
+            "0.5",
+            None,
+        ):
+            assert s.update({key: bad}) == {}, (key, bad)
+    assert (s.data["backgroundOpacity"], s.data["visualOpacity"]) == (0, 1.0)
+
+
+def test_hand_edited_out_of_range_opacities_load_as_the_defaults(tmp_path: Path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"backgroundOpacity": 3, "visualOpacity": 0.0}))
+    s = Settings(path)
+    assert (s.data["backgroundOpacity"], s.data["visualOpacity"]) == (0, 1.0)
+
+
+def test_hand_edited_huge_int_opacities_load_as_the_defaults(tmp_path: Path):
+    path = tmp_path / "settings.json"
+    path.write_text(
+        '{"backgroundOpacity": 1' + "0" * 400 + ', "visualOpacity": 1' + "0" * 400 + "}"
+    )
+    s = Settings(path)
+    assert (s.data["backgroundOpacity"], s.data["visualOpacity"]) == (0, 1.0)

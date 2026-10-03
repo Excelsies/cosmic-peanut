@@ -18,7 +18,8 @@
  *   previous: string | null; dev: boolean; builtin: boolean }} RepoInfo
  * @typedef {{ id: string; name: string }} SourceInfo
  * @typedef {{ quality?: QualityMode; reduceFlashing?: boolean; autoCycleSeconds?: number;
- *   hudVisible?: boolean; photosensitivityNoticeSeen?: boolean; transparent?: boolean }} Settings
+ *   hudVisible?: boolean; photosensitivityNoticeSeen?: boolean; transparent?: boolean;
+ *   backgroundOpacity?: number; visualOpacity?: number }} Settings
  * @typedef {{ hostCpu: number; rssMb: number; analysisMsP50: number; captureToSendMsP95: number;
  *   droppedFrames: number; latencyMsP95?: number }} Stats
  *
@@ -167,6 +168,9 @@ function parseSource(v) {
   return isObj(v) && isStr(v.id) && isStr(v.name) ? { id: v.id, name: v.name } : null;
 }
 
+/** Same floor as VISUAL_OPACITY_MIN in src/tidalviz/settings.py. */
+export const VISUAL_OPACITY_MIN = 0.1;
+
 /** @param {unknown} v @returns {Settings} */
 export function parseSettings(v) {
   /** @type {Settings} */
@@ -178,6 +182,8 @@ export function parseSettings(v) {
   if (isBool(v.hudVisible)) out.hudVisible = v.hudVisible;
   if (isBool(v.photosensitivityNoticeSeen)) out.photosensitivityNoticeSeen = v.photosensitivityNoticeSeen;
   if (isBool(v.transparent)) out.transparent = v.transparent;
+  if (isNum(v.backgroundOpacity) && v.backgroundOpacity >= 0 && v.backgroundOpacity <= 1) out.backgroundOpacity = v.backgroundOpacity;
+  if (isNum(v.visualOpacity) && v.visualOpacity >= VISUAL_OPACITY_MIN && v.visualOpacity <= 1) out.visualOpacity = v.visualOpacity;
   return out;
 }
 

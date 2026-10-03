@@ -435,6 +435,76 @@ describe("app: transparent background and borderless window", () => {
     expect(root.classList.contains("transparent")).toBe(false);
   });
 
+  /** @param {HTMLElement} root @param {string} name */
+  const cssVar = (root, name) => root.style.getPropertyValue(name);
+  /** @param {HTMLElement} root @param {string} id */
+  const slider = (root, id) => /** @type {HTMLInputElement} */ (root.querySelector(`#${id}`));
+
+  it("has a background slider (0 to 1) and a visual slider (0.1 to 1) that follow the saved values", () => {
+    const { app, root } = setup();
+    app.handle(hello({ settings: { transparent: true, backgroundOpacity: 0.6, visualOpacity: 0.4 } }));
+    const bg = slider(root, "background-opacity"), vis = slider(root, "visual-opacity");
+    expect([bg.type, bg.min, bg.max, bg.value, bg.disabled]).toEqual(["range", "0", "1", "0.6", false]);
+    expect([vis.type, vis.min, vis.max, vis.value, vis.disabled]).toEqual(["range", "0.1", "1", "0.4", false]);
+    expect(cssVar(root, "--bg-alpha")).toBe("0.6");
+    expect(cssVar(root, "--visual-opacity")).toBe("0.4");
+  });
+
+  it("defaults to a see-through backdrop and a full-strength visual", () => {
+    const { app, root } = setup();
+    app.handle(hello({ settings: { transparent: true } }));
+    expect(cssVar(root, "--bg-alpha")).toBe("0");
+    expect(cssVar(root, "--visual-opacity")).toBe("1");
+  });
+
+  it("the transparent checkbox gates both sliders, whatever the saved values", () => {
+    const { app, root } = setup();
+    app.handle(hello({ settings: { transparent: false, backgroundOpacity: 0.6, visualOpacity: 0.3 } }));
+    expect(slider(root, "background-opacity").disabled).toBe(true);
+    expect(slider(root, "visual-opacity").disabled).toBe(true);
+    expect(cssVar(root, "--visual-opacity")).toBe("1");
+    expect(root.classList.contains("transparent")).toBe(false);
+    const box = /** @type {HTMLInputElement} */ (root.querySelector("#transparent"));
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+    expect(slider(root, "background-opacity").disabled).toBe(false);
+    expect(slider(root, "visual-opacity").disabled).toBe(false);
+    expect(cssVar(root, "--bg-alpha")).toBe("0.6");
+    expect(cssVar(root, "--visual-opacity")).toBe("0.3");
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
+    expect(slider(root, "visual-opacity").disabled).toBe(true);
+    expect(cssVar(root, "--visual-opacity")).toBe("1");
+  });
+
+  it("the sliders are independent: each changes only its own variable, live, and saves on release", () => {
+    const { app, root, sent } = setup();
+    app.handle(hello({ settings: { transparent: true } }));
+    const bg = slider(root, "background-opacity"), vis = slider(root, "visual-opacity");
+    bg.value = "0.7";
+    bg.dispatchEvent(new Event("input"));
+    expect(cssVar(root, "--bg-alpha")).toBe("0.7");
+    expect(cssVar(root, "--visual-opacity")).toBe("1");
+    vis.value = "0.25";
+    vis.dispatchEvent(new Event("input"));
+    expect(cssVar(root, "--visual-opacity")).toBe("0.25");
+    expect(cssVar(root, "--bg-alpha")).toBe("0.7");
+    expect(sent.filter((m) => "backgroundOpacity" in m || "visualOpacity" in m)).toEqual([]);
+    bg.dispatchEvent(new Event("change"));
+    expect(sent).toContainEqual({ type: "settings", backgroundOpacity: 0.7 });
+    vis.dispatchEvent(new Event("change"));
+    expect(sent).toContainEqual({ type: "settings", visualOpacity: 0.25 });
+  });
+
+  it("never lets the visual go below its floor", () => {
+    const { app, root } = setup();
+    app.handle(hello({ settings: { transparent: true } }));
+    const vis = slider(root, "visual-opacity");
+    vis.value = "0.02";
+    vis.dispatchEvent(new Event("input"));
+    expect(Number(cssVar(root, "--visual-opacity"))).toBeGreaterThanOrEqual(0.1);
+  });
+
   it("the top bar drags the frameless window", () => {
     const { app, root } = setup();
     app.handle(hello());
