@@ -9,11 +9,11 @@
  * buffer that decays over about one rotation. Sustained tones trace concentric arcs, a melody
  * steps between radii, drum hits leave radial spokes, and silence is black. It is fully deterministic.
  *
- * GPU: the phosphor is a fixed 2048 × 512 (bearing × radius) half-float ping-pong, independent of
- * the canvas size; each frame one pass decays it and repaints the wedge swept since the last frame
- * (blending last frame's spectrum into this one's across the wedge), and one full-screen pass draws
- * the scope (phosphor + glow, arm, graticule) analytically. Pure logic is in lib/radar.js and
- * tested there. Nothing is allocated per frame.
+ * GPU: the phosphor is a fixed 2048 × 512 (bearing × radius) one-channel half-float ping-pong,
+ * independent of the canvas size; each frame one pass decays it and repaints the wedge swept since
+ * the last frame (blending last frame's spectrum into this one's across the wedge), and one
+ * full-screen pass draws the scope (phosphor + glow, arm, graticule) analytically. Pure logic is in
+ * lib/radar.js and tested there. Nothing is allocated per frame.
  */
 import { createFlashLimiter } from "./lib/flash.js";
 import { createProgram, createTarget } from "./lib/gl.js";
@@ -46,7 +46,7 @@ export default async function create(ctx) {
   const vao = gl.createVertexArray();
 
   // Phosphor ping-pong; bearing wraps around, radius clamps.
-  const targets = [createTarget(gl), createTarget(gl)];
+  const targets = [createTarget(gl, { red: true }), createTarget(gl, { red: true })];
   for (const t of targets) {
     t.resize(N_ANG, N_RAD);
     gl.bindTexture(gl.TEXTURE_2D, t.tex);
