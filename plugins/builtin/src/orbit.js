@@ -63,7 +63,8 @@ export default function create(ctx) {
 
   // Floor ring and a static star field (built once).
   const ringGeo = new THREE.RingGeometry(RADIUS - 0.35, RADIUS + 0.35, 128);
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, side: THREE.DoubleSide });
+  // Flat and always seen from above, so one draw (transparent DoubleSide otherwise draws twice).
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, side: THREE.DoubleSide, forceSinglePass: true });
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.rotation.x = -Math.PI / 2;
   scene.add(ring);
