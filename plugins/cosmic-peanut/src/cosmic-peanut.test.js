@@ -119,9 +119,11 @@ function frameDraws(gl, viz) {
   return gl.draws.slice(n);
 }
 
+/** Last call that set the uniform `name`. @param {any} gl @param {string} name */
+const lastUniformCall = (gl, name) =>
+  gl.calls.findLast((/** @type {any[]} */ c) => c[0].startsWith("uniform") && c[1].name === name);
 /** Value last given to the uniform `name`. @param {any} gl @param {string} name */
-const lastUniform = (gl, name) =>
-  gl.calls.findLast((/** @type {any[]} */ c) => c[0].startsWith("uniform") && c[1].name === name)?.[2];
+const lastUniform = (gl, name) => lastUniformCall(gl, name)?.[2];
 
 describe("cosmic-peanut GL", () => {
   it("holds only a 1×1 soft texture in Fine lines, and frees it again on Soft → Fine", async () => {
@@ -171,5 +173,30 @@ describe("cosmic-peanut GL", () => {
     setParams({ density: "dense" });
     expect(frameDraws(gl, viz)[0].args).toEqual(["LINE_STRIP", 0, 513, 399]);
     expect(gl.calls.filter((/** @type {any[]} */ c) => c[0] === "createBuffer" || c[0] === "bufferData")).toEqual([]);
+  });
+
+  it("sends constant and param-derived state once, not every frame", async () => {
+    const { gl, viz, setParams } = await setup();
+    frameDraws(gl, viz);
+    const n = gl.calls.length;
+    frameDraws(gl, viz);
+    const names = gl.calls.slice(n).map((/** @type {any[]} */ c) => (c[0].startsWith("uniform") ? c[1].name : c[0]));
+    for (const once of ["uHist", "uM", "uRadius", "uSrc", "uN", "uAmp", "uGain", "uPalette"]) expect(names).not.toContain(once);
+    for (const once of ["activeTexture", "clearColor", "bindVertexArray"]) expect(names).not.toContain(once);
+    expect(gl.calls.slice(n)).not.toContainEqual(["disable", "DEPTH_TEST"]); // never enabled
+    expect(names).toContain("uHead");
+    expect(gl.calls).toContainEqual(["clearColor", 0, 0, 0, 0]);
+    expect(lastUniform(gl, "uM")).toBe(512);
+    expect(lastUniform(gl, "uRadius")).toBe(1);
+    expect(lastUniform(gl, "uAmp")).toBe(DEFAULTS.amp);
+    expect(lastUniform(gl, "uGain")).toBe(ringGain(DEFAULTS.bright, 240, false));
+
+    setParams({ amp: 0.4, bright: 1.5, palette: "ember", density: "dense" });
+    expect([lastUniform(gl, "uAmp"), lastUniform(gl, "uPalette"), lastUniform(gl, "uN")]).toEqual([0.4, 1, 400]);
+    expect(lastUniform(gl, "uGain")).toBe(ringGain(1.5, 400, false));
+    setParams({ lines: "fine" });
+    expect(lastUniform(gl, "uGain")).toBe(ringGain(1.5, 400, true));
+    const [rings] = frameDraws(gl, viz);
+    expect(rings.program).toBe(lastUniformCall(gl, "uGain")[1].program);
   });
 });

@@ -5,8 +5,9 @@
  *
  * All geometry is computed on the GPU from gl_VertexID / gl_InstanceID (point j, ring i) and an
  * M × N R32F history texture used as a circular buffer, so a frame is a few uniforms, at most a few
- * one-row uploads, and one drawArraysInstanced call (plus a blit in Soft lines mode). The logic lives in ./lib (pure,
- * tested); this file is the GL glue. frame() allocates nothing.
+ * one-row uploads, and one drawArraysInstanced call (plus a blit in Soft lines mode). State that
+ * only changes with params is set in params(). The logic lives in ./lib (pure, tested); this file
+ * is the GL glue. frame() allocates nothing.
  */
 import { cameraDistance, createCamera, RADIUS } from "./lib/camera.js";
 import { createProgram } from "./lib/gl.js";
@@ -41,12 +42,32 @@ export default async function create(ctx) {
 
   const vao = /** @type {WebGLVertexArrayObject} */ (gl.createVertexArray()); // no attributes
   const hist = gl.createTexture();
+  // This context is ours alone, so constant state is set once (texture unit 0 stays active).
+  gl.bindVertexArray(vao);
+  gl.clearColor(0, 0, 0, 0); // transparent canvas: the shell supplies black or the desktop
+  gl.useProgram(blit.program);
+  gl.uniform1i(blit.u.uSrc, 0);
+  gl.useProgram(rings.program);
+  gl.uniform1i(U.uHist, 0);
+  gl.uniform1i(U.uM, M);
+  gl.uniform1f(U.uRadius, RADIUS);
 
   const history = createHistory(M, densityRings(ctx.params.density), (row, ring) => {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, M, 1, gl.RED, gl.FLOAT, ring);
   });
   const camera = createCamera();
   const pulse = createPulse();
+
+  function setParamUniforms() {
+    const p = ctx.params;
+    const fine = renderPath(p.lines, p.antialias) === "canvas";
+    gl.useProgram(rings.program);
+    gl.uniform1i(U.uN, history.N);
+    gl.uniform1f(U.uAmp, Number(p.amp));
+    gl.uniform1f(U.uGain, ringGain(Number(p.bright), history.N, fine));
+    gl.uniform1f(U.uPalette, paletteIndex(p.palette));
+  }
+  setParamUniforms();
 
   /** Allocate a sentinel-filled history texture for the current density. */
   function allocate() {
@@ -108,7 +129,6 @@ export default async function create(ctx) {
       const strength = gentle(Number(p.pulse), pulseDefault, ctx.reduceMotion, GENTLE.pulse);
       const amp = Number(p.amp);
       const path = renderPath(p.lines, p.antialias);
-      const fine = path === "canvas";
 
       // Push the rings that are due (fixed rate), one texSubImage2D row each.
       gl.bindTexture(gl.TEXTURE_2D, hist);
@@ -128,27 +148,16 @@ export default async function create(ctx) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, path === "msaa" ? msaaFbo : softFbo);
         gl.viewport(0, 0, softW, softH);
       }
-      gl.clearColor(0, 0, 0, 0); // transparent canvas: the shell supplies black or the desktop
       gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.disable(gl.DEPTH_TEST);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE); // additive: overlapping rings glow
       gl.useProgram(rings.program);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.uniform1i(U.uHist, 0);
       gl.uniform1i(U.uHead, history.head);
-      gl.uniform1i(U.uN, history.N);
-      gl.uniform1i(U.uM, M);
       gl.uniform1f(U.uFrac, history.frac);
-      gl.uniform1f(U.uAmp, amp);
-      gl.uniform1f(U.uRadius, RADIUS);
       gl.uniform1f(U.uCamDist, dist);
-      gl.uniform1f(U.uGain, ringGain(Number(p.bright), history.N, fine));
-      gl.uniform1f(U.uPalette, paletteIndex(p.palette));
       gl.uniform1f(U.uPulse, pulseAmt);
       gl.uniformMatrix4fv(U.uProj, false, camera.proj);
       gl.uniformMatrix4fv(U.uView, false, camera.view);
-      gl.bindVertexArray(vao);
       gl.drawArraysInstanced(gl.LINE_STRIP, 0, M + 1, history.N - 1); // ring N − 1 has faded out
       gl.disable(gl.BLEND);
 
@@ -162,10 +171,8 @@ export default async function create(ctx) {
         gl.viewport(0, 0, width, height);
         gl.useProgram(blit.program);
         gl.bindTexture(gl.TEXTURE_2D, softTex);
-        gl.uniform1i(blit.u.uSrc, 0);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
-      gl.bindVertexArray(null);
     },
 
     resize() {
@@ -175,6 +182,7 @@ export default async function create(ctx) {
     params(changed) {
       if ("antialias" in changed || "lines" in changed) resizeSoft();
       if ("density" in changed && history.setDensity(densityRings(changed.density))) allocate();
+      setParamUniforms();
     },
 
     pointer(e) {
