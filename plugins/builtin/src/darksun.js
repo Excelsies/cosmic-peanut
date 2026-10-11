@@ -67,11 +67,25 @@ export default async function create(ctx) {
   const beam = createBeam();
   const surge = createSurge();
   const glow = createGlow();
-  const pal = palette(ctx.params.palette, new Float32Array(PALETTES.SIZE));
+  const pal = new Float32Array(PALETTES.SIZE);
   const P = resolveParams(ctx.params, ctx.reduceMotion, /** @type {any} */ ({}));
   const L = layout(ctx.size.width, ctx.size.height, P, /** @type {any} */ ({}));
   let corona = 0;
   let drift = 0;
+
+  // Constant program state: samplers, and the palette (re-sent by params()).
+  gl.useProgram(prog.program);
+  gl.uniform1i(u.u_prof, 0);
+  gl.uniform1i(u.u_bg, 1);
+  gl.uniform1f(u.u_n, N);
+  function setPalette() {
+    palette(ctx.params.palette, pal);
+    gl.useProgram(bgProg.program);
+    gl.uniform3fv(ub.u_c, pal);
+    gl.useProgram(prog.program);
+    gl.uniform3fv(u.u_c, pal);
+  }
+  setPalette();
 
   return {
     frame(audio, time) {
@@ -90,8 +104,6 @@ export default async function create(ctx) {
       corona += CORONA_RATE * P.motion * (0.6 + 0.8 * sun.level) * dt;
       drift += P.motion * dt;
 
-      gl.disable(gl.DEPTH_TEST);
-      gl.disable(gl.BLEND);
       gl.bindVertexArray(vao);
       const painted = isPainted(ctx.params.backdrop);
 
@@ -108,7 +120,6 @@ export default async function create(ctx) {
         gl.uniform1f(ub.u_unit, L.unit);
         gl.uniform1f(ub.u_horizon, L.horizon);
         gl.uniform1f(ub.u_time, drift);
-        gl.uniform3fv(ub.u_c, pal);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
 
@@ -124,9 +135,6 @@ export default async function create(ctx) {
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.useProgram(prog.program);
-      gl.uniform1i(u.u_prof, 0);
-      gl.uniform1i(u.u_bg, 1);
-      gl.uniform1f(u.u_n, N);
       gl.uniform2f(u.u_res, w, h);
       gl.uniform1f(u.u_unit, L.unit);
       gl.uniform1f(u.u_horizon, L.horizon);
@@ -141,7 +149,6 @@ export default async function create(ctx) {
       gl.uniform1f(u.u_corona, corona);
       gl.uniform1f(u.u_glow, glow.value);
       gl.uniform1f(u.u_painted, painted ? 1 : 0);
-      gl.uniform3fv(u.u_c, pal);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.activeTexture(gl.TEXTURE0);
     },
@@ -150,7 +157,7 @@ export default async function create(ctx) {
     resize() {},
 
     params(changed) {
-      if ("palette" in changed) palette(ctx.params.palette, pal);
+      if ("palette" in changed) setPalette();
     },
 
     dispose() {

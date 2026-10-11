@@ -90,8 +90,6 @@ export default async function create(ctx) {
     gl.uniform1f(u.u_warp, eff.warp);
     gl.uniform1f(u.u_duty, drive.duty);
     gl.uniform4f(u.u_outline, outlineScale, motion.roll, 0.55 * Math.sin(motion.jaw), 0);
-    gl.uniform2fv(u.u_ripples, ripples.data);
-    gl.uniform1fv(u.u_wave, waveNow);
     gl.uniform3f(u.u_ink, colors[0], colors[1], colors[2]);
     gl.uniform3f(u.u_paper, colors[3], colors[4], colors[5]);
     gl.uniform1f(u.u_paperAlpha, look.paperAlpha);
@@ -101,6 +99,12 @@ export default async function create(ctx) {
    * @type {Float32Array}
    */
   let waveNow = new Float32Array(WAVE_POINTS);
+
+  // Constant program state.
+  gl.useProgram(skullProg.program);
+  gl.uniform1f(skullProg.u.u_camDist, CAM_DIST);
+  gl.useProgram(compProg.program);
+  gl.uniform1i(compProg.u.u_skull, 0);
 
   return {
     frame(audio, time) {
@@ -148,8 +152,6 @@ export default async function create(ctx) {
       const sw = Math.max(1, Math.round(w * SKULL_RES));
       const sh = Math.max(1, Math.round(h * SKULL_RES));
       if (layer.width !== sw || layer.height !== sh) layer.resize(sw, sh);
-      gl.disable(gl.DEPTH_TEST);
-      gl.disable(gl.BLEND);
       gl.bindVertexArray(vao);
       gl.bindFramebuffer(gl.FRAMEBUFFER, layer.fbo);
       gl.viewport(0, 0, sw, sh);
@@ -161,7 +163,6 @@ export default async function create(ctx) {
       gl.uniformMatrix3fv(u.u_rot, false, rot);
       gl.uniform1f(u.u_scale, motion.scale);
       gl.uniform1f(u.u_focal, focal);
-      gl.uniform1f(u.u_camDist, CAM_DIST);
       gl.uniform1f(u.u_circle, circle);
       gl.uniform1f(u.u_jaw, motion.jaw);
       gl.uniform1f(u.u_eyeSpin, spin);
@@ -175,9 +176,11 @@ export default async function create(ctx) {
       gl.useProgram(compProg.program);
       u = compProg.u;
       shared(u, w, h, outlineScale);
+      // Ripples and the waveform bend only the full-screen stripes (opPhase full).
+      gl.uniform2fv(u.u_ripples, ripples.data);
+      gl.uniform1fv(u.u_wave, waveNow);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, layer.tex);
-      gl.uniform1i(u.u_skull, 0);
       gl.uniform1f(u.u_circle, circle);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },

@@ -66,8 +66,9 @@ export default async function create(ctx) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   const raw = new Float32Array(N_RAD);
-  const last = new Float32Array(N_RAD);
-  const column = new Float32Array(N_RAD);
+  const columns = new Float32Array(2 * N_RAD);
+  const last = columns.subarray(0, N_RAD);
+  const column = columns.subarray(N_RAD);
   const spectrumColumn = createSpectrumColumn();
 
   const sweep = createSweep();
@@ -81,7 +82,19 @@ export default async function create(ctx) {
   const flash = createFlashLimiter();
   let kick = 0;
 
-  phosphorPalette(ctx.params.palette, pal);
+  // Constant program state: samplers, and the palette (re-sent by params()).
+  gl.useProgram(paint.program);
+  gl.uniform1i(paint.u.u_prev, 0);
+  gl.uniform1i(paint.u.u_column, 1);
+  gl.useProgram(comp.program);
+  gl.uniform1i(comp.u.u_phos, 0);
+  function setPalette() {
+    phosphorPalette(ctx.params.palette, pal);
+    gl.useProgram(comp.program);
+    gl.uniform3f(comp.u.u_col, pal[0], pal[1], pal[2]);
+    gl.uniform3f(comp.u.u_hot, pal[3], pal[4], pal[5]);
+  }
+  setPalette();
 
   return {
     frame(audio, time) {
@@ -105,13 +118,10 @@ export default async function create(ctx) {
       const pulse = flash.step(kick, time.dt, ctx.reduceFlashing);
 
       gl.bindVertexArray(vao);
-      gl.disable(gl.DEPTH_TEST);
-      gl.disable(gl.BLEND);
 
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, columnTex);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N_RAD, 1, gl.RED, gl.FLOAT, last);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 1, N_RAD, 1, gl.RED, gl.FLOAT, column);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N_RAD, 2, gl.RED, gl.FLOAT, columns);
 
       // 1. Paint this frame's spectrogram slice into the swept wedge: in place, or rebasing the
       // whole store (faded by the clock) into the other target.
@@ -124,8 +134,6 @@ export default async function create(ctx) {
       gl.activeTexture(gl.TEXTURE0);
       // Only full passes read u_prev; in place it must still not be the texture being drawn.
       gl.bindTexture(gl.TEXTURE_2D, targets[full ? cur : cur ^ 1].tex);
-      gl.uniform1i(paint.u.u_prev, 0);
-      gl.uniform1i(paint.u.u_column, 1);
       gl.uniform1i(paint.u.u_full, full ? 1 : 0);
       gl.uniform1f(paint.u.u_decay, Math.exp(-clock));
       gl.uniform1f(paint.u.u_scale, full ? 1 : Math.exp(clock));
@@ -155,13 +163,10 @@ export default async function create(ctx) {
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.useProgram(comp.program);
       gl.bindTexture(gl.TEXTURE_2D, dst.tex);
-      gl.uniform1i(comp.u.u_phos, 0);
       gl.uniform1f(comp.u.u_fade, Math.exp(-decay.clock));
       gl.uniform2f(comp.u.u_center, scope.cx, scope.cy);
       gl.uniform1f(comp.u.u_radius, scope.radius);
       gl.uniform1f(comp.u.u_turn, now - Math.floor(now));
-      gl.uniform3f(comp.u.u_col, pal[0], pal[1], pal[2]);
-      gl.uniform3f(comp.u.u_hot, pal[3], pal[4], pal[5]);
       gl.uniform1f(comp.u.u_grat, Number(p.graticule));
       gl.uniform1f(comp.u.u_gain, 1 + 0.2 * pulse);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -171,7 +176,7 @@ export default async function create(ctx) {
     resize() {},
 
     params(changed) {
-      if ("palette" in changed) phosphorPalette(ctx.params.palette, pal);
+      if ("palette" in changed) setPalette();
     },
 
     dispose() {
