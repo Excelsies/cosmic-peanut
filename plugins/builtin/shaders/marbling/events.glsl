@@ -9,6 +9,7 @@
 
 const int MAX_PENDING = 48;
 const int DRAG_ITERS = 7;
+const float DRAG_REACH = 4.5;    // σ past |v|: beyond it a drag moves no float32 coordinate
 uniform int u_n;
 uniform vec4 u_a[MAX_PENDING];   // (type, x, y, R² | 1/σ² | 0)
 uniform vec4 u_b[MAX_PENDING];   // drop: (cell r², ...); drag: (vx, vy, ...)
@@ -39,9 +40,13 @@ vec4 marble(vec2 p) {
     } else if (a.x < 2.5) {         // DRAG (fixed-point inverse)
       vec2 v = u_b[k].xy;
       vec2 p0 = p;
-      for (int i = 0; i < DRAG_ITERS; i++) {
-        vec2 d = p - a.yz;
-        p = p0 - v * exp(-dot(d, d) * a.w);
+      vec2 d0 = p - a.yz;
+      float reach = length(v) + DRAG_REACH * inversesqrt(a.w);
+      if (dot(d0, d0) < reach * reach) {
+        for (int i = 0; i < DRAG_ITERS; i++) {
+          vec2 d = p - a.yz;
+          p = p0 - v * exp(-dot(d, d) * a.w);
+        }
       }
     } else {                        // SHIFT
       p -= a.yz;

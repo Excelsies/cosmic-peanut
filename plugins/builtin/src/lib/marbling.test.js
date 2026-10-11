@@ -1,6 +1,8 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse } from "./marbling.js";
+import { createEventQueue, MAX_PENDING, resizeMap, toOldPage, DEFAULTS, effectiveParams, createMarbler, EV_DRAG, EV_DROP, EV_SHIFT, MAX_EVENTS, createRng, clampDrag, PALETTES, paletteOf, REGIONS, strongestRegion, dragForward, dragInverse, dropForward, dropInverse, DRAG_REACH } from "./marbling.js";
+// @ts-expect-error -- a Node builtin (tests run in Node); the web tsconfig has no @types/node.
+import { readFileSync } from "node:fs";
 
 const out = new Float64Array(2);
 
@@ -73,6 +75,39 @@ describe("stylus drag", () => {
     const v = new Float64Array([0.001, 0]);
     clampDrag(invS2, v);
     expect(v[0]).toBe(0.001);
+  });
+
+  it("past |v| + DRAG_REACH·σ the inverse moves no float32 coordinate, so the shader may skip it", () => {
+    // events.glsl's iteration in float32, at and beyond the cutoff, with coordinates down to 1e-6.
+    const f = Math.fround;
+    const v = clampDrag(invS2, new Float64Array([0.6, 0.8]));
+    const reach = Math.hypot(v[0], v[1]) + DRAG_REACH / Math.sqrt(invS2);
+    const sx = f(reach * 0.8 + 1e-6);
+    const sy = f(reach * 0.6 + 1e-6);
+    for (let i = 0; i < 2000; i++) {
+      const ang = (i / 2000) * 2 * Math.PI;
+      const dist = reach * (1 + (i % 7) * 0.05);
+      const p0x = f(sx + dist * Math.cos(ang));
+      const p0y = f(sy + dist * Math.sin(ang));
+      if (Math.hypot(p0x - sx, p0y - sy) < reach) continue;
+      let x = p0x;
+      let y = p0y;
+      for (let k = 0; k < 7; k++) {
+        const dx = f(x - sx);
+        const dy = f(y - sy);
+        const e = f(Math.exp(-f(f(f(dx * dx) + f(dy * dy)) * f(invS2))));
+        x = f(p0x - f(f(v[0]) * e));
+        y = f(p0y - f(f(v[1]) * e));
+      }
+      expect([x, y]).toEqual([p0x, p0y]);
+      dragInverse(sx, sy, v[0], v[1], invS2, p0x, p0y, out);
+      expect([out[0], out[1]]).toEqual([p0x, p0y]);
+    }
+  });
+
+  it("events.glsl cuts the drag off at the same reach", () => {
+    const src = readFileSync(new URL("../../shaders/marbling/events.glsl", import.meta.url), "utf8");
+    expect(Number(src.match(/const float DRAG_REACH = ([\d.]+);/)?.[1])).toBe(DRAG_REACH);
   });
 });
 
