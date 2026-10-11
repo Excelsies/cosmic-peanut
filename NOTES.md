@@ -83,7 +83,8 @@ estimate from the audit, not a measurement here.
   vertex and index buffers (−1 to −1.6 MB). The README gives GPU memory per DPR.
 - ≤ 1/255: Undertow's hue matrix on the CPU (≤ 0.006% of pixels), Stargate `pow` → multiplies
   (≤ 0.012%), Tie-Dye CPU absorbance (≤ 0.002%), Skull Trip CPU uniforms (≤ 0.014%), Eclipse and
-  Marbling `pow` skips (≤ 6 px), Cosmic Peanut's removed varying (1–2 px).
+  Marbling `pow` skips (≤ 6 px), Cosmic Peanut's removed varying (1–2 px in its group's render,
+  bit-identical in the merged tree).
 - **Tried and dropped (changed pixels):** Blaze analytic curl noise (the sim diverges, 7–21% of
   pixels); Undertow's atan-free swirl (1/255 on up to 0.73%); Tentacube's fold sign test (1–2
   mirror-line pixels per still); Pulsar's cached row paths (~128 AA edge pixels); Radar's decay
@@ -94,8 +95,9 @@ estimate from the audit, not a measurement here.
 **Render A/B of the merged tree** (all 18 visualizers, drums and music, stills 30/90/150): Bars,
 Orbit, Pulsar, Blaze, Cascade, Radar, Tentacube, Dark Sun, Tetraballs, Halo and Cosmic Peanut are
 bit-identical; Laminar shares a bit-identical outcome on every still (RUNS=3). The rest move at
-most 1/255: Undertow ≤ 0.006% of pixels, Stargate ≤ 0.012%, Tie-Dye ≤ 0.002%, Skull Trip ≤ 0.014%,
-Eclipse ≤ 6 px, Marbling 1 px.
+most 1/255: Undertow ≤ 0.006% of pixels, Stargate ≤ 0.012%, Tie-Dye ≤ 0.002%, Eclipse ≤ 6 px,
+Marbling 1 px. Skull Trip ≤ 0.014%: a deterministic 1/255 shift (each tree is stable over 3 runs
+and they share no outcome on 4 of 6 stills, ~500 px on two), so it is accepted, not bit-identical.
 
 Known gap: no live per-process CPU/GPU measurement of the merged app yet; everything above is unit
 tests, emulation and llvmpipe renders, not the RTX 4090 or macOS. Soft lines with antialias at
