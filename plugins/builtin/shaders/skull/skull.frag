@@ -75,8 +75,8 @@ vec3 toJaw(vec3 p) {
   return JAW_HINGE + vec3(q.x, q.y * c + q.z * s, -q.y * s + q.z * c);
 }
 
-float sdJaw(vec3 p) {
-  vec3 j = toJaw(p);
+// j: a point in the jaw's frame (toJaw).
+float sdJaw(vec3 j) {
   vec3 m = vec3(abs(j.x), j.yz);
   float d = sdEllipsoid(j - CHIN_C, CHIN_R);
   d = smin(d, sdCapsule(m, JAW_BODY_A, JAW_BODY_B, JAW_BODY_R), 0.1);
@@ -86,10 +86,15 @@ float sdJaw(vec3 p) {
 }
 
 float map(vec3 p) {
+  float d = sdCranium(p);
   // The jaw never reaches above y = -0.3 (its ramus tops out below the hinge at any angle), so
   // well above that a lower bound on its distance will do and it isn't evaluated.
-  float jaw = p.y > 0.0 ? p.y + 0.3 : sdJaw(p);
-  return min(sdCranium(p), jaw);
+  if (p.y > 0.0) return min(d, p.y + 0.3);
+  // Nor is sdJaw ever below its bounding sphere's distance (lib/skull-bounds.js): where that is no
+  // nearer than the cranium, the min is the cranium.
+  vec3 j = toJaw(p);
+  if (length(j - JAW_BOUND_C) - JAW_BOUND_R >= d) return d;
+  return min(d, sdJaw(j));
 }
 
 vec3 calcNormal(vec3 p) {

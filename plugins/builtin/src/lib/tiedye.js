@@ -249,6 +249,16 @@ export function paletteOf(name, out) {
 }
 
 /**
+ * Each palette color as dye absorbance for tiedye.frag (Beer–Lambert, in linear light):
+ * −ln(max(c^2.2, 0.004)) per channel, floored so a black dye stays finite.
+ * @param {Float32Array} colors sRGB (paletteOf) @param {Float32Array} out same length
+ */
+export function absorbanceOf(colors, out) {
+  for (let i = 0; i < colors.length; i++) out[i] = -Math.log(Math.max(Math.pow(colors[i], 2.2), 0.004));
+  return out;
+}
+
+/**
  * Band geometry, mirrored in shaders/tiedye/tiedye.frag (keep the constants in sync). Positions are
  * in unit-radius coordinates (1 = half the shorter screen side), centered.
  */

@@ -9,6 +9,7 @@ import {
   PATTERNS,
   FABRICS,
   paletteOf,
+  absorbanceOf,
   patternIndex,
   fabricIndex,
   MAX_COLORS,
@@ -365,5 +366,20 @@ describe("createIntensity", () => {
     expect(on.perSecond).toBeGreaterThan(1);
     expect(off.max).toBeLessThanOrEqual(1 + PULSE_MAX);
     expect(off.max).toBeGreaterThan(1 + PULSE_MAX / 2);
+  });
+});
+
+describe("absorbanceOf (tiedye.frag's dye absorbance)", () => {
+  it("is −ln of the linear-light color, floored so black dye stays finite", () => {
+    const colors = new Float32Array(MAX_COLORS * 3);
+    paletteOf("sunset", colors);
+    colors.set([1, 0.5, 0], 21);
+    const a = absorbanceOf(colors, new Float32Array(MAX_COLORS * 3));
+    for (let i = 0; i < colors.length; i++) {
+      expect(a[i], `${i}`).toBeCloseTo(-Math.log(Math.max(Math.pow(colors[i], 2.2), 0.004)), 6);
+    }
+    expect(a[21]).toBeCloseTo(0, 9);
+    expect(a[22]).toBeCloseTo(2.2 * Math.LN2, 6);
+    expect(a[23]).toBeCloseTo(-Math.log(0.004), 6);
   });
 });

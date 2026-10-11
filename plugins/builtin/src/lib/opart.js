@@ -331,7 +331,7 @@ function smin(/** @type {number} */ a, /** @type {number} */ b, /** @type {numbe
  * @param {number} y
  * @param {number} flow warp clock
  * @param {number} warp
- * @param {number[]} outline [screen units per object unit, tilt, jaw drop] (u_outline)
+ * @param {number[]} outline [screen units per object unit, tilt, jaw drop] (u_outline.x, u_tilt, u_outline.z)
  */
 export function opField(x, y, flow, warp, outline) {
   const ox = fbm(x * 0.8, y * 0.8 + 0.5 * flow);

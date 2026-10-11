@@ -94,7 +94,8 @@ void main() {
   // Rim: thin bright ring, brightest at the diamond.
   float da = atan(sin(ang - u_diamond), cos(ang - u_diamond));
   float diamond = exp(-da * da / 0.3);
-  float ring = exp(-pow((d - 1.0) / 0.03, 2.0));
+  float rz = (d - 1.0) / 0.03;
+  float ring = exp(-rz * rz);
   float outer = d > 1.0 ? exp(-(d - 1.0) / 0.12) : 0.0;
   float rimI = u_rim * (0.3 + 2.4 * diamond);
   light += RIM * rimI * (ring * 0.9 + outer * 0.5);
@@ -113,7 +114,8 @@ void main() {
 
   // ---- horizon: a thin line of light, breathing glow above and a little below
   float dy = fc.y - hz;
-  float line = exp(-pow(dy / (0.0022 * u_unit), 2.0));
+  float lz = dy / (0.0022 * u_unit);
+  float line = exp(-lz * lz);
   float above = dy < 0.0 ? exp(dy / (0.035 * u_unit)) : exp(-dy / (0.006 * u_unit));
   light += GLOW * (line * (0.7 + 0.4 * u_glow) + above * 0.45 * u_glow);
 
@@ -134,12 +136,15 @@ void main() {
     }
     dpth *= 0.25;
     rangeCov = 0.25 * cov * step(-1.0, dy);
-    float k = clamp(dy / max(u_rangeDepth, 1.0), 0.0, 1.0);
-    float mott = fbm3(p * vec2(10.0, 2.5) + 11.0);
-    float edge = smoothstep(0.0, 0.45 * max(dpth, 1.0), dpth - dy); // darker, pinker toward the tips
-    rangeCol = mix(mix(GLOW, SKY_LOW, 0.6) * 0.8, GLOW, mix(0.35, 1.0, edge));
-    rangeCol = mix(rangeCol, rangeCol * mix(vec3(1.0), SKY_LOW, 0.3), smoothstep(0.2, 1.0, k));
-    rangeCol *= (0.84 + 0.26 * mott) * (0.8 + 0.25 * u_glow);
+    // rangeCol only ever shows scaled by rangeCov.
+    if (rangeCov > 0.0) {
+      float k = clamp(dy / max(u_rangeDepth, 1.0), 0.0, 1.0);
+      float mott = fbm3(p * vec2(10.0, 2.5) + 11.0);
+      float edge = smoothstep(0.0, 0.45 * max(dpth, 1.0), dpth - dy); // darker, pinker toward the tips
+      rangeCol = mix(mix(GLOW, SKY_LOW, 0.6) * 0.8, GLOW, mix(0.35, 1.0, edge));
+      rangeCol = mix(rangeCol, rangeCol * mix(vec3(1.0), SKY_LOW, 0.3), smoothstep(0.2, 1.0, k));
+      rangeCol *= (0.84 + 0.26 * mott) * (0.8 + 0.25 * u_glow);
+    }
     // Light spilling from the ridges onto the ground.
     float spill = dy > 0.0 && dy > dpth ? exp((dpth - dy) / (0.012 * u_unit)) : 0.0;
     light += GLOW * spill * 0.16 * u_glow;

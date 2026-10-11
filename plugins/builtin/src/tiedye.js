@@ -16,6 +16,7 @@
  */
 import { createProgram, createTarget } from "./lib/gl.js";
 import {
+  absorbanceOf,
   createArmWarp,
   createBandWidths,
   createBlooms,
@@ -63,8 +64,26 @@ export default async function create(ctx) {
   const blooms = createBlooms(0x7ed1e);
   const intensity = createIntensity();
   const spinIn = { twist: 0, speed: 0, bassAtt: 0, reactivity: 0, reduceMotion: false };
-  let nColors = paletteOf(ctx.params.palette, colors);
+  const absorbance = new Float32Array(MAX_COLORS * 3);
+  let nColors = 0;
   let clock = 0;
+
+  // Constant program state: the sampler, and the look (re-sent by params()).
+  gl.useProgram(comp.program);
+  gl.uniform1i(comp.u.u_dye, 0);
+  function setLook() {
+    nColors = paletteOf(ctx.params.palette, colors);
+    absorbanceOf(colors, absorbance);
+    const fabric = fabricIndex(ctx.params.fabric);
+    gl.useProgram(prog.program);
+    gl.uniform1i(u.u_pattern, patternIndex(ctx.params.pattern));
+    gl.uniform1i(u.u_fabric, fabric);
+    gl.uniform1i(u.u_n, nColors);
+    gl.uniform3fv(u.u_abs, absorbance);
+    gl.useProgram(comp.program);
+    gl.uniform1i(comp.u.u_fabric, fabric);
+  }
+  setLook();
 
   return {
     frame(audio, time) {
@@ -85,9 +104,6 @@ export default async function create(ctx) {
       const strength = intensity.step(audio.onset, audio.onsetStrength, dt, ctx.reduceFlashing);
       clock += dt * speed;
 
-      const fabric = fabricIndex(ctx.params.fabric);
-      gl.disable(gl.DEPTH_TEST);
-      gl.disable(gl.BLEND);
       gl.bindVertexArray(vao);
 
       // 1. Dye at reduced resolution (linear, premultiplied).
@@ -96,14 +112,10 @@ export default async function create(ctx) {
       gl.useProgram(prog.program);
       gl.uniform2f(u.u_res, dye.width, dye.height);
       gl.uniform1f(u.u_px, 0.5 * Math.min(dye.width, dye.height));
-      gl.uniform1i(u.u_pattern, patternIndex(ctx.params.pattern));
-      gl.uniform1i(u.u_fabric, fabric);
       gl.uniform1f(u.u_twist, spin.twist);
       gl.uniform1f(u.u_turns, spin.turns);
       gl.uniform1f(u.u_time, clock);
-      gl.uniform1i(u.u_n, nColors);
       gl.uniform1fv(u.u_edges, edges);
-      gl.uniform3fv(u.u_col, colors);
       gl.uniform1fv(u.u_warp, wave);
       gl.uniform1f(u.u_warpAmt, WARP_GAIN * Math.min(2, react));
       gl.uniform1f(u.u_bleed, Number(ctx.params.bleed));
@@ -120,15 +132,13 @@ export default async function create(ctx) {
       gl.useProgram(comp.program);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, dye.tex);
-      gl.uniform1i(comp.u.u_dye, 0);
-      gl.uniform1i(comp.u.u_fabric, fabric);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
 
     resize,
 
     params(changed) {
-      if ("palette" in changed) nColors = paletteOf(ctx.params.palette, colors);
+      if ("palette" in changed || "pattern" in changed || "fabric" in changed) setLook();
     },
 
     dispose() {

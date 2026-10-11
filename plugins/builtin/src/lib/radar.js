@@ -140,31 +140,55 @@ function lerpBin(/** @type {ArrayLike<number>} */ s, /** @type {number} */ x) {
  * (radiusOfFreq). Texel k covers radii [k/n, (k+1)/n], i.e. a band of fractional bins [b0, b1]:
  * it takes the max of the bins inside it and of the spectrum interpolated at both edges, so a
  * narrow partial keeps its full strength however many bins a texel spans, and texels narrower than
- * a bin interpolate smoothly. Radii below F_MIN or above `maxHz` are black. Allocation-free.
- * @param {ArrayLike<number>} spectrum `audio.spectrum` (any length; bin i ≈ i · (sampleRate/2) / length Hz)
- * @param {number} sampleRate
- * @param {number} maxHz frequency at R_OUTER
- * @param {Float32Array} out one value per radial texel
+ * a bin interpolate smoothly. Radii below F_MIN or above `maxHz` are black. The bin edges are
+ * cached until the texel count, rate, top frequency or spectrum length changes; allocation-free
+ * otherwise.
  */
-export function spectrumColumn(spectrum, sampleRate, maxHz, out) {
-  const n = out.length;
-  const len = spectrum.length;
-  const binsPerHz = (2 * len) / sampleRate;
-  for (let k = 0; k < n; k++) {
-    const r0 = Math.max(R_INNER, k / n);
-    const r1 = Math.min(R_OUTER, (k + 1) / n);
-    if (r1 <= r0 || len < 2) {
-      out[k] = 0;
-      continue;
+export function createSpectrumColumn() {
+  let lo = new Float64Array(0);
+  let hi = new Float64Array(0);
+  let rate = NaN;
+  let top = NaN;
+  let bins = -1;
+  /**
+   * @param {ArrayLike<number>} spectrum `audio.spectrum` (any length; bin i ≈ i · (sampleRate/2) / length Hz)
+   * @param {number} sampleRate
+   * @param {number} maxHz frequency at R_OUTER
+   * @param {Float32Array} out one value per radial texel
+   */
+  return function column(spectrum, sampleRate, maxHz, out) {
+    const n = out.length;
+    const len = spectrum.length;
+    if (lo.length !== n || rate !== sampleRate || top !== maxHz || bins !== len) {
+      if (lo.length !== n) {
+        lo = new Float64Array(n);
+        hi = new Float64Array(n);
+      }
+      rate = sampleRate;
+      top = maxHz;
+      bins = len;
+      const binsPerHz = (2 * len) / sampleRate;
+      for (let k = 0; k < n; k++) {
+        const r0 = Math.max(R_INNER, k / n);
+        const r1 = Math.min(R_OUTER, (k + 1) / n);
+        lo[k] = r1 <= r0 ? NaN : freqAtRadius(r0, maxHz) * binsPerHz;
+        hi[k] = freqAtRadius(r1, maxHz) * binsPerHz;
+      }
     }
-    const b0 = freqAtRadius(r0, maxHz) * binsPerHz;
-    const b1 = freqAtRadius(r1, maxHz) * binsPerHz;
-    let v = Math.max(lerpBin(spectrum, b0), lerpBin(spectrum, b1));
-    const hi = Math.min(len - 1, Math.floor(b1));
-    for (let i = Math.max(0, Math.ceil(b0)); i <= hi; i++) if (spectrum[i] > v) v = spectrum[i];
-    out[k] = v;
-  }
-  return out;
+    for (let k = 0; k < n; k++) {
+      const b0 = lo[k];
+      const b1 = hi[k];
+      if (Number.isNaN(b0) || len < 2) {
+        out[k] = 0;
+        continue;
+      }
+      let v = Math.max(lerpBin(spectrum, b0), lerpBin(spectrum, b1));
+      const last = Math.min(len - 1, Math.floor(b1));
+      for (let i = Math.max(0, Math.ceil(b0)); i <= last; i++) if (spectrum[i] > v) v = spectrum[i];
+      out[k] = v;
+    }
+    return out;
+  };
 }
 
 /** Auto-gain: the reference level never drops below REF_MIN dB (at most this much boost). */

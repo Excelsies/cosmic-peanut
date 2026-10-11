@@ -3,8 +3,9 @@
 // is soft); composite.frag then adds the cotton weave at full resolution.
 //
 // Dye is modelled as absorbance (Beer–Lambert): each palette color c becomes A = -log(c) in linear
-// light, concentrations add absorbance, and the white cotton shows through as exp(-A). So where two
-// dyes overlap they darken and mix like real dye, and thin dye reads as a faded tint.
+// light (u_abs, from lib/tiedye.js absorbanceOf), concentrations add absorbance, and the white
+// cotton shows through as exp(-A). So where two dyes overlap they darken and mix like real dye,
+// and thin dye reads as a faded tint.
 //
 // Band geometry (bandCoord) mirrors src/lib/tiedye.js — keep the constants in sync.
 precision highp float;
@@ -20,7 +21,7 @@ uniform float u_turns;     // rotation, turns
 uniform float u_time;      // slow clock for the fabric's breathing
 uniform int u_n;           // palette colors
 uniform float u_edges[9];  // cumulative band edges, 0..1
-uniform vec3 u_col[8];     // dye colors, sRGB
+uniform vec3 u_abs[8];     // dye absorbance per palette color
 uniform float u_warp[64];  // waveform around the circle, -1..1
 uniform float u_warpAmt;
 uniform float u_bleed;     // 0..1 edge softness
@@ -87,8 +88,7 @@ float ridged(vec2 p) {
 }
 
 // --- helpers -----------------------------------------------------------------------------------
-vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
-vec3 absorb(int i) { return -log(max(toLinear(u_col[i]), vec3(0.004))); }
+vec3 absorb(int i) { return u_abs[i]; }
 
 float warpAt(float turns) {
   float x = abs(fract(turns) * 2.0 - 1.0) * 63.0;
@@ -102,8 +102,9 @@ void main() {
   // The shirt lies a little unevenly: a slow, large-scale drape warp, breathing very gently.
   vec2 drape = vec2(fbm3(p * 0.9 + 3.1 + u_time * 0.01), fbm3(p * 0.9 - 7.7 - u_time * 0.01)) - 0.5;
   vec2 q = p + 0.09 * drape;
-  // The bound center of a twist is a crumpled knot: extra local warp there.
-  q += 0.05 * (1.0 - smoothstep(0.0, 0.3, length(p))) * (vec2(fbm3(p * 9.0 + 2.0), fbm3(p * 9.0 - 4.0)) - 0.5);
+  // The bound center of a twist is a crumpled knot: extra local warp there (none past r = 0.3).
+  float knot = 1.0 - smoothstep(0.0, 0.3, length(p));
+  if (knot > 0.0) q += 0.05 * knot * (vec2(fbm3(p * 9.0 + 2.0), fbm3(p * 9.0 - 4.0)) - 0.5);
 
   float r = length(q);
   float ang = atan(q.y, q.x) / TAU;
@@ -199,7 +200,8 @@ void main() {
     if (b.w <= 0.0) continue;
     float dn = length(q - b.xy) / max(b.z, 1e-3);
     dn *= 1.0 + 0.7 * (edgeN - 0.5) + 0.25 * fineN;
-    float c = (1.0 - smoothstep(0.45, 1.0, dn)) + 0.3 * exp(-pow((dn - 0.88) / 0.1, 2.0));
+    float rz = (dn - 0.88) / 0.1;
+    float c = (1.0 - smoothstep(0.45, 1.0, dn)) + 0.3 * exp(-rz * rz);
     int bi = min(int(u_bloomCol[k] * float(u_n)), u_n - 1);
     float amt = clamp(c * b.w * (1.0 - 0.7 * crinkle), 0.0, 1.0);
     // Fresh dye mostly displaces what was there (it floods the fibres), darkening only a little.
