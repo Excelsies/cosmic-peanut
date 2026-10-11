@@ -26,7 +26,7 @@ function audioAt(f) {
   return /** @type {import('../tidalviz').AudioFrame} */ (
     /** @type {unknown} */ ({
       bands: Float32Array.from({ length: 64 }, (_, i) => (loud ? 0.3 + 0.6 * Math.abs(Math.sin(f * 0.3 + i)) : 0)),
-      waveform: Float32Array.from({ length: 2048 }, (_, i) => (loud ? Math.sin(i * 0.05 + f) * 0.5 : 0)),
+      waveform: Float32Array.from({ length: 256 }, (_, i) => (loud ? Math.sin(i * 0.4 + f) * 0.5 : 0)),
       onset: loud && f % 30 === 0,
       onsetStrength: 0.8,
       bassAtt: loud ? 1.2 : 0,
@@ -81,7 +81,7 @@ describe("bars", () => {
     expect(frame(s, f++).length).toBeGreaterThan(0);
     expect(frame(s, f++)).toEqual([]);
     const a = audioAt(f);
-    a.waveform[1000] = 1e-6;
+    a.waveform[100] = 1e-6;
     s.log.length = 0;
     s.viz.frame(a, { now: f / 60, dt: 1 / 60, frame: f });
     expect(s.log.length).toBeGreaterThan(0);
