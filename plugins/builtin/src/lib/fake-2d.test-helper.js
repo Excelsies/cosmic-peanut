@@ -1,6 +1,22 @@
 // @ts-check
 /** Test-only helper (not imported by any visualizer). */
 
+/** Records its construction and color stops, so two identically built gradients compare equal. */
+class FakeGradient {
+  /** @param {string} kind @param {number[]} args */
+  constructor(kind, args) {
+    this.kind = kind;
+    this.args = args;
+    /** @type {[number, string][]} */
+    this.stops = [];
+  }
+
+  /** @param {number} offset @param {string} color */
+  addColorStop(offset, color) {
+    this.stops.push([offset, color]);
+  }
+}
+
 /**
  * A 2d-context stand-in that records path, fill and stroke calls with the state at the time;
  * save/restore keep a state stack like the real thing.
@@ -19,6 +35,10 @@ export function fakeContext() {
     lineJoin: "miter",
     clearRect: (/** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ w, /** @type {number} */ h) =>
       log.push({ op: "clear", x, y, w, h }),
+    fillRect: (/** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ w, /** @type {number} */ h) =>
+      log.push({ op: "fillRect", x, y, w, h, alpha: g.globalAlpha, style: g.fillStyle }),
+    createLinearGradient: (/** @type {number[]} */ ...args) => new FakeGradient("linear", args),
+    createRadialGradient: (/** @type {number[]} */ ...args) => new FakeGradient("radial", args),
     save: () => {
       log.push({ op: "save" });
       stack.push([g.globalCompositeOperation, g.globalAlpha, g.strokeStyle, g.fillStyle, g.lineWidth, g.lineJoin]);
