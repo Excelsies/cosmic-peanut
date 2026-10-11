@@ -13,17 +13,8 @@ uniform float u_warp;     // ripple strength (mid)
 uniform float u_decay;    // brightness kept this frame
 uniform float u_mirror;   // 1 = left/right symmetric
 uniform vec3 u_tint;
-uniform float u_hue;      // hue rotation this frame (radians), so trails change colour as they age
-
-vec3 hueRotate(vec3 c, float a) {
-  // Rotate chroma in YIQ space.
-  const mat3 toYiq = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
-  const mat3 toRgb = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);
-  vec3 y = toYiq * c;
-  float cs = cos(a), sn = sin(a);
-  y.yz = vec2(y.y * cs - y.z * sn, y.y * sn + y.z * cs);
-  return max(toRgb * y, 0.0);
-}
+uniform mat3 u_hue;       // this frame's chroma rotation in YIQ, as an RGB matrix (lib/color.js
+                          // hueRotation), so trails change colour as they age
 
 void main() {
   float aspect = u_res.x / u_res.y;
@@ -45,7 +36,7 @@ void main() {
   vec2 px = 0.5 / u_res;
   vec3 c = 0.5 * (texture(u_prev, uv + px).rgb + texture(u_prev, uv - px).rgb);
   // Trails drift through the hues and are pulled gently back toward the tint.
-  c = hueRotate(c, u_hue);
+  c = max(u_hue * c, 0.0);
   c = mix(c, dot(c, vec3(0.333)) * u_tint * 1.3, 0.02);
   c *= 1.0 + 0.012 * (u_tint - 0.5);  // saturate toward the tint a touch
   o = vec4(c * u_decay, 1.0);

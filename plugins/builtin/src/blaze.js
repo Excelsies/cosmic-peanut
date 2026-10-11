@@ -21,8 +21,9 @@
  *   scalar    advect temperature + fuel, feed fuel from the seed along the bottom, jet heat, burn, cool
  * and composite the temperature through the palette ramp onto the transparent canvas.
  *
- * Sim targets are RGBA16F when the GPU can render to half floats (EXT_color_buffer_float or
- * EXT_color_buffer_half_float). Without either they fall back to RGBA8: velocity is stored
+ * Sim targets are half floats when the GPU can render to them (EXT_color_buffer_float or
+ * EXT_color_buffer_half_float): RG16F for velocity and temperature + fuel, R16F for vorticity,
+ * divergence and pressure. Without either they fall back to RGBA8: velocity is stored
  * offset-encoded (±4 heights/s in 8 bits), temperature clamps at 1 and vorticity confinement is
  * off, so the fire is coarser and calmer but still works.
  */
@@ -86,12 +87,12 @@ export default async function create(ctx) {
   let cur = 0; // scalar ping-pong
   let vcur = 0; // velocity ping-pong
 
-  /** (Re)allocate one target and clear it to `r, g`. @param {{tex: WebGLTexture, fbo: WebGLFramebuffer}} t @param {number} r @param {number} g */
+  /** (Re)allocate one target (`one`: a single channel) and clear it to `r, g`. @param {{tex: WebGLTexture, fbo: WebGLFramebuffer}} t @param {number} r @param {number} g */
   function alloc(t, r, g, one = false) {
     gl.bindTexture(gl.TEXTURE_2D, t.tex);
-    if (one) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, sw, sh, 0, gl.RED, gl.HALF_FLOAT, null);
-    else if (half) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, sw, sh, 0, gl.RGBA, gl.HALF_FLOAT, null);
-    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, sw, sh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    if (!half) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, sw, sh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    else if (one) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, sw, sh, 0, gl.RED, gl.HALF_FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, sw, sh, 0, gl.RG, gl.HALF_FLOAT, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
     gl.clearColor(r, g, 0, 1);
@@ -105,9 +106,68 @@ export default async function create(ctx) {
     sh = s.height;
     for (const t of scal) alloc(t, 0, 0);
     for (const t of vel) alloc(t, VENC_Y, VENC_Y);
-    alloc(curl, 0, 0); // unused without half floats, but kept complete for the sampler
+    alloc(curl, 0, 0, true); // unused without half floats, but kept complete for the sampler
     if (half) for (const t of [div, ...pres]) alloc(t, 0, 0, true);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.useProgram(curlP.program);
+    gl.uniform1f(curlP.u.u_inv, sh);
+    gl.useProgram(velP.program);
+    gl.uniform1f(velP.u.u_aspect, sw / sh);
+    gl.uniform1f(velP.u.u_texelH, 1 / sh);
+    gl.useProgram(scalP.program);
+    gl.uniform2f(scalP.u.u_texel, 1 / sw, 1 / sh);
+    gl.uniform1f(scalP.u.u_aspect, sw / sh);
+    gl.useProgram(compP.program);
+    gl.uniform2f(compP.u.u_simTexel, 1 / sw, 1 / sh);
+  }
+
+  // Uniform values persist per program, so samplers and constants are set once, size-dependent
+  // ones in resize() and param-dependent ones in applyParams(); a sim step only sends its clock.
+  gl.useProgram(curlP.program);
+  gl.uniform1i(curlP.u.u_vel, 0);
+  gl.uniform2f(curlP.u.u_venc, VENC_X, VENC_Y);
+  gl.useProgram(velP.program);
+  gl.uniform1i(velP.u.u_vel, 0);
+  gl.uniform1i(velP.u.u_scal, 1);
+  gl.uniform1i(velP.u.u_seed, 2);
+  gl.uniform1i(velP.u.u_curl, 3);
+  gl.uniform1f(velP.u.u_jetVel, JET_VEL);
+  gl.uniform2f(velP.u.u_venc, VENC_X, VENC_Y);
+  gl.uniform1f(velP.u.u_damp, 2.5);
+  gl.useProgram(divP.program);
+  gl.uniform1i(divP.u.u_vel, 0);
+  gl.useProgram(presP.program);
+  gl.uniform1i(presP.u.u_p, 0);
+  gl.uniform1i(presP.u.u_div, 1);
+  gl.useProgram(projP.program);
+  gl.uniform1i(projP.u.u_vel, 0);
+  gl.uniform1i(projP.u.u_p, 1);
+  gl.useProgram(scalP.program);
+  gl.uniform1i(scalP.u.u_scal, 0);
+  gl.uniform1i(scalP.u.u_vel, 1);
+  gl.uniform1i(scalP.u.u_seed, 2);
+  gl.uniform2f(scalP.u.u_venc, VENC_X, VENC_Y);
+  gl.uniform1f(scalP.u.u_jetVel, JET_VEL);
+  gl.uniform1f(scalP.u.u_burn, 3);
+  gl.useProgram(compP.program);
+  gl.uniform1i(compP.u.u_scal, 0);
+  gl.uniform1i(compP.u.u_lut, 1);
+
+  function applyParams() {
+    const p = ctx.params;
+    const spectro = resolveFeed(p.feed) === "spectrogram" ? 1 : 0;
+    const intensity = Number(p.intensity);
+    gl.useProgram(velP.program);
+    gl.uniform1f(velP.u.u_rise, spectro * RISE_PULL);
+    // In the spectrogram the column's rise speed carries the gas; buoyancy only adds a lift.
+    gl.uniform1f(velP.u.u_buoy, 3 - 1.8 * spectro);
+    gl.useProgram(scalP.program);
+    gl.uniform1f(scalP.u.u_ember, 0.08 * intensity);
+    gl.uniform1f(scalP.u.u_jetHeat, JET_HEAT * intensity);
+    gl.uniform1f(scalP.u.u_rise, spectro);
+    gl.uniform1f(scalP.u.u_cool, 9 / Math.max(0.3, Number(p.height)));
+    gl.useProgram(compP.program);
+    gl.uniform1f(compP.u.u_glow, Number(p.glow));
   }
 
   // Fuel line: 256×1 RGBA16F (r = fuel, g = jet strength, b = rise speed), linear across the
@@ -144,15 +204,17 @@ export default async function create(ctx) {
   let clock = 0;
 
   applyPalette();
+  applyParams();
   resize();
 
   /** Draw a fullscreen pass into `t` (or the canvas when null). @param {{fbo: WebGLFramebuffer} | null} t */
   function into(t) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fbo : null);
   }
+  let active = -1;
   /** @param {number} unit @param {WebGLTexture | null} tex */
   function bind(unit, tex) {
-    gl.activeTexture(gl.TEXTURE0 + unit);
+    if (unit !== active) gl.activeTexture(gl.TEXTURE0 + (active = unit));
     gl.bindTexture(gl.TEXTURE_2D, tex);
   }
 
@@ -161,11 +223,9 @@ export default async function create(ctx) {
       const p = ctx.params;
       motion(p, ctx.reduceMotion, mo);
       const intensity = Number(p.intensity);
-      const height = Number(p.height);
 
       // 1. Audio → fuel line + jets (CPU, no allocation).
       feed.step(audio, time.dt, p.feed, p.layout, mo.reactivity, ctx.reduceFlashing);
-      const spectro = resolveFeed(p.feed) === "spectrogram" ? 1 : 0;
       const fuel = feed.fuel;
       const jet = feed.jet;
       const rise = feed.rise;
@@ -185,7 +245,6 @@ export default async function create(ctx) {
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
       gl.viewport(0, 0, sw, sh);
-      const aspect = sw / sh;
       const dtSim = (1 / SIM_RATE) * mo.speed;
       const n = stepper.step(time.dt);
 
@@ -201,9 +260,6 @@ export default async function create(ctx) {
           into(curl);
           gl.useProgram(curlP.program);
           bind(0, v0.tex);
-          gl.uniform1i(curlP.u.u_vel, 0);
-          gl.uniform2f(curlP.u.u_venc, VENC_X, VENC_Y);
-          gl.uniform1f(curlP.u.u_inv, sh);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
 
@@ -214,22 +270,13 @@ export default async function create(ctx) {
         bind(1, s0.tex);
         bind(3, curl.tex);
         const u = velP.u;
-        gl.uniform1i(u.u_vel, 0);
-        gl.uniform1i(u.u_scal, 1);
-        gl.uniform1i(u.u_seed, 2);
-        gl.uniform1i(u.u_curl, 3);
-        gl.uniform1f(u.u_jetVel, JET_VEL);
-        gl.uniform1f(u.u_rise, spectro * RISE_PULL);
-        gl.uniform2f(u.u_venc, VENC_X, VENC_Y);
-        gl.uniform1f(u.u_aspect, aspect);
-        gl.uniform1f(u.u_dt, dtSim);
+        // Motion follows the live reduceMotion, so it's per frame (identical across the steps).
+        if (k === 0) {
+          gl.uniform1f(u.u_dt, dtSim);
+          gl.uniform1f(u.u_turb, 2.5 * mo.turbulence);
+          gl.uniform1f(u.u_vort, half ? 10 * mo.turbulence : 0);
+        }
         gl.uniform1f(u.u_time, clock);
-        // In the spectrogram the column's rise speed carries the gas; buoyancy only adds a lift.
-        gl.uniform1f(u.u_buoy, 3 - 1.8 * spectro);
-        gl.uniform1f(u.u_turb, 2.5 * mo.turbulence);
-        gl.uniform1f(u.u_vort, half ? 10 * mo.turbulence : 0);
-        gl.uniform1f(u.u_damp, 2.5);
-        gl.uniform1f(u.u_texelH, 1 / sh);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         let vOut = v1;
 
@@ -239,11 +286,8 @@ export default async function create(ctx) {
           into(div);
           gl.useProgram(divP.program);
           bind(0, v1.tex);
-          gl.uniform1i(divP.u.u_vel, 0);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
           gl.useProgram(presP.program);
-          gl.uniform1i(presP.u.u_p, 0);
-          gl.uniform1i(presP.u.u_div, 1);
           bind(1, div.tex);
           for (let j = 0; j < JACOBI; j++) {
             into(pres[(j + 1) & 1]);
@@ -254,8 +298,6 @@ export default async function create(ctx) {
           gl.useProgram(projP.program);
           bind(0, v1.tex);
           bind(1, pres[JACOBI & 1].tex);
-          gl.uniform1i(projP.u.u_vel, 0);
-          gl.uniform1i(projP.u.u_p, 1);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
           vOut = v0;
         } else {
@@ -268,24 +310,14 @@ export default async function create(ctx) {
         bind(0, s0.tex);
         bind(1, vOut.tex);
         const w = scalP.u;
-        gl.uniform1i(w.u_scal, 0);
-        gl.uniform1i(w.u_vel, 1);
-        gl.uniform1i(w.u_seed, 2);
-        gl.uniform2f(w.u_venc, VENC_X, VENC_Y);
-        gl.uniform2f(w.u_texel, 1 / sw, 1 / sh);
-        gl.uniform1f(w.u_aspect, aspect);
-        gl.uniform1f(w.u_dt, dtSim);
+        if (k === 0) {
+          gl.uniform1f(w.u_dt, dtSim);
+          gl.uniform1f(w.u_inject, 2.6 * intensity * (0.7 + 0.6 * boost));
+          // The flash-limited share of the boost that isn't bass stoke: the onset flare.
+          const flare = boost - 0.5 * react * drive.stoke;
+          gl.uniform1f(w.u_flare, 0.6 * intensity * (flare > 0 ? flare : 0));
+        }
         gl.uniform1f(w.u_time, clock);
-        gl.uniform1f(w.u_inject, 2.6 * intensity * (0.7 + 0.6 * boost));
-        gl.uniform1f(w.u_ember, 0.08 * intensity);
-        gl.uniform1f(w.u_jetHeat, JET_HEAT * intensity);
-        gl.uniform1f(w.u_jetVel, JET_VEL);
-        gl.uniform1f(w.u_rise, spectro);
-        // The flash-limited share of the boost that isn't bass stoke: the onset flare.
-        const flare = boost - 0.5 * react * drive.stoke;
-        gl.uniform1f(w.u_flare, 0.6 * intensity * (flare > 0 ? flare : 0));
-        gl.uniform1f(w.u_cool, 9 / Math.max(0.3, height));
-        gl.uniform1f(w.u_burn, 3);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
 
         cur ^= 1;
@@ -301,13 +333,9 @@ export default async function create(ctx) {
       bind(0, scal[cur].tex);
       bind(1, lutTex);
       const c = compP.u;
-      gl.uniform1i(c.u_scal, 0);
-      gl.uniform1i(c.u_lut, 1);
-      gl.uniform2f(c.u_simTexel, 1 / sw, 1 / sh);
       gl.uniform1f(c.u_aspect, cw / ch);
       gl.uniform1f(c.u_time, clock);
       gl.uniform1f(c.u_exposure, 1 + 0.3 * boost);
-      gl.uniform1f(c.u_glow, Number(p.glow));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
 
@@ -316,6 +344,7 @@ export default async function create(ctx) {
     params(changed) {
       if ("palette" in changed) applyPalette();
       if ("detail" in changed) resize();
+      applyParams();
     },
 
     dispose() {

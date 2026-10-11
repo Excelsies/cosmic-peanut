@@ -13,7 +13,7 @@ out vec4 o;
 
 uniform sampler2D u_hist;  // W x N RGBA: signed wave, streak, hue, energy
 uniform vec2 u_res;        // drawing-buffer pixels
-uniform float u_roll;      // radians
+uniform vec2 u_roll;       // cos, sin of the roll
 uniform float u_spread;    // field-of-view scale of the screen coordinate
 uniform float u_head;      // ring row of the newest row
 uniform float u_rows;      // N
@@ -35,8 +35,8 @@ vec3 pal(float t) { return u_pa + u_pb * cos(TAU * (u_pc * t + u_pd)); }
 
 void main() {
   vec2 p = (gl_FragCoord.xy - 0.5 * u_res) / (0.5 * u_res.y) * u_spread;
-  float c = cos(u_roll);
-  float s = sin(u_roll);
+  float c = u_roll.x;
+  float s = u_roll.y;
   vec2 q = vec2(c * p.x + s * p.y, c * p.y - s * p.x);  // camera frame
   float ay = max(abs(q.y), 1e-5);
   float side = q.y >= 0.0 ? 1.0 : -1.0;
@@ -64,9 +64,12 @@ void main() {
     float w = (1.0 - 0.22 * fk) * step(0.0, a) * step(a, u_rows - 1.5);
     vec4 t = texture(u_hist, vec2(sx, fract((u_head - a + 0.5) / u_rows)));
     float streak = t.g;
-    float lane = mix(0.2, streak * streak * streak, detail) + 0.45 * detail * pow(max(t.r, 0.0), 4.0);
+    float wave2 = max(t.r, 0.0) * max(t.r, 0.0);
+    float streak2 = streak * streak;
+    float streak4 = streak2 * streak2;
+    float lane = mix(0.2, streak2 * streak, detail) + 0.45 * detail * (wave2 * wave2);
     lum += w * lane;
-    core += w * pow(streak, 8.0) * detail;
+    core += w * (streak4 * streak4) * detail;
     hue += w * t.b;
     energy += w * t.a;
     wsum += w;

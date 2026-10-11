@@ -131,7 +131,7 @@ export default async function create(ctx) {
       gl.bindVertexArray(vao);
       gl.uniform1i(u.u_hist, 0);
       gl.uniform2f(u.u_res, w, h);
-      gl.uniform1f(u.u_roll, angle);
+      gl.uniform2f(u.u_roll, Math.cos(angle), Math.sin(angle));
       gl.uniform1f(u.u_spread, Number(ctx.params.spread));
       gl.uniform1f(u.u_head, history.head);
       gl.uniform1f(u.u_rows, history.N);

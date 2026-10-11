@@ -12,7 +12,9 @@
  *     and turns water hitting the pool into short-lived spray.
  *  3. Particles are drawn as velocity-aligned streaks (instanced quads pulling state straight from
  *     the texture: no CPU readback) additively into a float target.
- *  4. Spray also splats into a quarter-res mist buffer that drifts, decays and is blurred.
+ *  4. Spray also splats into a quarter-res mist buffer that drifts, decays and is blurred. The
+ *     mist is one channel, so its buffers are R16F (renderable and blendable under either float
+ *     extension).
  *  5. Composite: water over mist, tone-mapped, premultiplied with alpha = max(r, g, b).
  *
  * Layout (lib/cascade.js `layout`, unit-tested): by default the lip spans the whole window just
@@ -154,12 +156,13 @@ export default async function create(ctx) {
     const { width: w, height: h } = ctx.size;
     waterTarget.resize(w, h);
     const { mistW: mw, mistH: mh } = layout(w, h, ctx.params, L);
-    mistCur.resize(mw, mh);
-    mistTmp.resize(mw, mh);
-    mistOut.resize(mw, mh);
-    // createTarget clears to opaque black; the mist feedback must start empty in every channel.
     for (const t of [mistCur, mistTmp, mistOut]) {
+      t.width = mw;
+      t.height = mh;
+      gl.bindTexture(gl.TEXTURE_2D, t.tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, mw, mh, 0, gl.RED, gl.HALF_FLOAT, null);
       gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }

@@ -9,7 +9,7 @@
  * Shaders live in shaders/undertow/ and load with ctx.assets.text. The waveform and bands reach the
  * GPU as one 512×2 float texture updated in place, so the frame loop allocates nothing.
  */
-import { hexToRgb } from "./lib/color.js";
+import { hexToRgb, hueRotation } from "./lib/color.js";
 import { createFlashLimiter } from "./lib/flash.js";
 import { createProgram, createTarget } from "./lib/gl.js";
 
@@ -40,6 +40,7 @@ export default async function create(ctx) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
   const tint = new Float32Array(3);
+  const hue = new Float32Array(9);
   const lineColor = new Float32Array(3);
   const flash = createFlashLimiter();
   let kick = 0;
@@ -98,7 +99,7 @@ export default async function create(ctx) {
       gl.uniform1f(warp.u.u_decay, (0.955 - 0.01 * Math.min(2, audio.trebAtt)) ** k);
       gl.uniform1f(warp.u.u_mirror, ctx.params.mirror ? 1 : 0);
       gl.uniform3fv(warp.u.u_tint, tint);
-      gl.uniform1f(warp.u.u_hue, (0.006 + 0.01 * audio.trebAtt) * speed * k);
+      gl.uniformMatrix3fv(warp.u.u_hue, false, hueRotation((0.006 + 0.01 * audio.trebAtt) * speed * k, hue));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       // 2. Inject this frame's shapes additively.
