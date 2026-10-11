@@ -104,7 +104,9 @@ calls `loop.call_soon_threadsafe(hub.publish, data)`. The hub sends the newest f
 whose previous send has completed and drops the rest. When it replaces a pending onset frame, it
 sets the onset flag on the newer frame (keeping that frame's own `onsetAge`, which already counts
 from the dropped onset) and returns `True`, so the host can time that frame's `onsetSeen`.
-Analysis pauses while no renderer is connected.
+Analysis pauses while no renderer is connected. A silent frame equal to the last published one
+apart from frame index and host time is published only once a second; `resume()`, called on every
+client-count change, sends the next one regardless, so a newly connected client gets a frame.
 
 ## 3. HTTP servers
 

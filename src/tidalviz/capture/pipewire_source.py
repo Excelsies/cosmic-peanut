@@ -3,8 +3,10 @@ counterpart is catap_source.py).
 
 No PipeWire binding ships as a wheel, so we run ``pw-record --raw`` and read float32 from its
 stdout; PipeWire resamples and downmixes to the 48 kHz stereo the pipeline expects. System audio
-follows the default output's monitor. ``--latency 256`` makes one 512-frame block (the analysis
-hop) per write; 512 writes two at once, which the pipeline counts as a dropped hop.
+follows the default output's monitor. ``--latency 512`` makes one 512-frame block (the analysis
+hop) per graph cycle. pw-record fwrite()s to a fully buffered stdout, which on a pipe would hold
+blocks back (two at once at 512, one 5.3 ms cycle late at 256), so it runs under ``stdbuf -o0``.
+Without stdbuf we fall back to ``--latency 256``, which at least keeps one block per hop.
 
 Per-app capture (``app:<pid>``) targets the app's first running playback node. Its pid comes from
 ``application.process.id`` or, for native and ALSA-plugin clients, PipeWire's ``pipewire.sec.pid``.
@@ -20,6 +22,7 @@ import logging
 import math
 import os
 import select
+import shutil
 import subprocess
 import threading
 import time
@@ -44,6 +47,7 @@ _OUTPUT_STREAM = "Stream/Output/Audio"
 
 Dump = list[dict[str, Any]]
 _warned_no_pw_dump = False
+_warned_no_stdbuf = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +57,7 @@ class AudioApp:
     pid: int
 
 
-def record_args(serial: int | None) -> list[str]:
+def record_args(serial: int | None, *, latency: int = BLOCK) -> list[str]:
     """``pw-record`` arguments: the default output's monitor, or one stream node's output.
 
     An app target is pinned with ``node.dont-reconnect``: when that stream ends, WirePlumber would
@@ -69,7 +73,7 @@ def record_args(serial: int | None) -> list[str]:
         "--raw",
         *target,
         "--latency",
-        str(BLOCK // 2),
+        str(latency),
         "--rate",
         str(SAMPLE_RATE),
         "--channels",
@@ -192,6 +196,21 @@ def list_audio_apps() -> list[AudioApp]:
 # --- sources -----------------------------------------------------------------------------------
 
 
+def _command(program: str, serial: int | None) -> list[str]:
+    """``stdbuf -o0 pw-record ...``, or plain pw-record at half a block without stdbuf."""
+    global _warned_no_stdbuf
+    path = shutil.which(program)
+    if path is None:  # stdbuf would start and only then fail to exec it
+        raise FileNotFoundError(f"{program} not found")
+    stdbuf = shutil.which("stdbuf")
+    if stdbuf is not None:
+        return [stdbuf, "-o0", path, *record_args(serial)]
+    if not _warned_no_stdbuf:
+        _warned_no_stdbuf = True
+        log.warning("stdbuf not found; capturing at --latency %d", BLOCK // 2)
+    return [path, *record_args(serial, latency=BLOCK // 2)]
+
+
 class _PipeWireSource:
     name = "pipewire"
 
@@ -228,7 +247,7 @@ class _PipeWireSource:
         # OSError (no pw-record) and RuntimeError (app gone) propagate; the pipeline treats
         # them as a failed start.
         proc = subprocess.Popen(
-            [self._program, *record_args(self._serial())],
+            _command(self._program, self._serial()),
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,

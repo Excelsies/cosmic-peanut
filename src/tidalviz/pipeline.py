@@ -4,8 +4,9 @@ Two threads:
 
 - **analysis**: sleeps on the ring's condition until a hop of new samples has arrived (driven
   by sample arrival, not a timer), analyzes the newest window, encodes it and calls
-  ``publish(bytes)``. If it falls behind it skips straight to the newest hop and counts the
-  skipped hops as dropped — frames are never queued.
+  ``publish(bytes)`` (an unchanged silent frame at most once a second). If it falls behind it
+  skips straight to the newest hop and counts the skipped hops as dropped — frames are never
+  queued.
 - **supervisor**: starts/stops sources (a catap start can take seconds), handles
   ``switch_source`` without touching the analysis thread, and restarts a source whose
   ``failed`` event is set (or whose start raised), with exponential backoff and status
@@ -37,6 +38,7 @@ SilenceCallback = Callable[[bool], None]
 RING_SECONDS = 1.0
 STATS_WINDOW = 512  # frames (~5.5 s) behind each reported percentile
 STABLE_AFTER_S = 10.0  # a source that ran this long before failing starts over at backoff[0]
+KEEPALIVE_S = 1.0  # an unchanged silent frame still goes out this often
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,8 +96,10 @@ class AudioPipeline:
         self._wake = threading.Event()  # pokes the supervisor
         self._running = False
         self._paused = False
+        self._unpause = threading.Event()  # wakes a paused analysis thread (resume or stop)
         self._format: SourceFormat | None = None
         self._ring = RingBuffer(1, 1)
+        self._resumed_at = (self._ring, 0)  # (ring, ring.written) when resume() was called
         self._analyzer: Analyzer | None = None
         self._configure(source.format)
 
@@ -103,6 +107,8 @@ class AudioPipeline:
         self._latency_ms = _Window(STATS_WINDOW)
         self._dropped = 0
         self._published = 0
+        self._last_sent: bytes | None = None
+        self._last_sent_at = 0.0
         self._silent_since: float | None = None
         self._silence_reported = False
         self._threads: list[threading.Thread] = []
@@ -127,6 +133,7 @@ class AudioPipeline:
         """Stop both threads and the active source. Blocks until they have finished."""
         self._running = False
         self._wake.set()
+        self._unpause.set()
         self._ring.wake()
         for t in self._threads:
             t.join(timeout=5.0)
@@ -142,8 +149,12 @@ class AudioPipeline:
         self._paused = True
 
     def resume(self) -> None:
+        """Also called on every client-count change: the next frame goes out even if unchanged."""
+        self._last_sent = None
+        ring = self._ring
+        self._resumed_at = (ring, ring.written)
         self._paused = False
-        self._ring.wake()
+        self._unpause.set()
 
     @property
     def paused(self) -> bool:
@@ -273,10 +284,14 @@ class AudioPipeline:
                 consumed = 0
             if not ring.wait_for(consumed + hop, timeout=0.1):
                 continue
-            written = ring.written
             if self._paused:
-                consumed = written
+                self._unpause.wait()
+                self._unpause.clear()
+                mark_ring, mark = self._resumed_at  # analyze only what arrived after resume()
+                ring = self._ring
+                consumed = mark if ring is mark_ring else 0  # a newer ring is all new
                 continue
+            written = ring.written
             hops = (written - consumed) // hop
             if hops > 1:
                 self._dropped += hops - 1  # stale: skip straight to the newest hop
@@ -291,7 +306,17 @@ class AudioPipeline:
         frame = analyzer.process(ring, host_time)
         self._analysis_ms.add((time.perf_counter() - t0) * 1000.0)  # the PRD's "analysis cost"
         data = encode(frame)
+        last = self._last_sent
+        if (
+            frame.silent
+            and last is not None
+            and host_time - self._last_sent_at < KEEPALIVE_S
+            and _same_but_time(data, last)
+        ):
+            self._track_silence(True, host_time)
+            return
         self._publish(data)
+        self._last_sent, self._last_sent_at = data, host_time
         self._published += 1
         self._latency_ms.add((self._clock() - host_time) * 1000.0)
         self._track_silence(frame.silent, host_time)
@@ -314,3 +339,13 @@ class AudioPipeline:
                 self._silence_reported = False
                 if cb is not None:
                     cb(False)
+
+
+def _same_but_time(a: bytes, b: bytes) -> bool:
+    """Equal frames apart from frameIndex (bytes 8-11) and hostTime (16-23)."""
+    return (
+        len(a) == len(b)
+        and a[:8] == b[:8]
+        and a[12:16] == b[12:16]
+        and a.startswith(memoryview(b)[24:], 24)  # compares in place: no 29 KB copy
+    )

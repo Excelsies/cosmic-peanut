@@ -4,21 +4,25 @@ Kinds:
 - ``sine1k``: a 0.5-amplitude 1 kHz sine.
 - ``click120``: broadband clicks at exactly 120 BPM, the first at 0.25 s
   (:meth:`SyntheticSource.click_positions` gives the exact onset samples).
-- ``demo``: a 120 BPM loop with kick, snare, hats, bass and a pad — music-like input.
+- ``demo``: a 4-bar 120 BPM loop with kick, snare, hats, bass and a pad — music-like input.
+  The loop is rendered once and repeats from its first bar line.
 - ``silence``: zeros.
 
-Every sample is a pure function of its absolute index, so ``render(n)`` is deterministic.
+Every sample is a pure function of its absolute index (``demo``: modulo the loop), so
+``render(n)`` is deterministic.
 """
 
 import numpy as np
 from numpy.typing import NDArray
 
+from tidalviz.capture.base import OnSamples
 from tidalviz.capture.paced import PacedSource
 from tidalviz.frame import F32
 
 KINDS = ("sine1k", "click120", "demo", "silence")
 BPM = 120.0
 CLICK_OFFSET_S = 0.25
+LOOP_BEATS = 16
 
 F64 = NDArray[np.float64]
 I64 = NDArray[np.int64]
@@ -59,6 +63,12 @@ class SyntheticSource(PacedSource):
         n_hat = int(0.05 * sr)
         hat = np.diff(rng.standard_normal(n_hat + 1))  # differentiated noise ≈ high-passed
         self._hat: F64 = 0.12 * hat * _decay(n_hat, sr, 0.012)
+        self._loop: F32 | None = None
+
+    def start(self, on_samples: OnSamples) -> None:
+        if self.kind == "demo":
+            self._demo_loop()  # before pacing starts, not as a late first block
+        super().start(on_samples)
 
     def click_positions(self, n: int) -> list[int]:
         """Sample indices (< n) where ``click120`` clicks start."""
@@ -71,12 +81,18 @@ class SyntheticSource(PacedSource):
         elif self.kind == "click120":
             mono = _events(i, self._click, self.click_offset, self.beat_period)
         elif self.kind == "demo":
-            mono = self._demo(i)
+            mono = np.take(self._demo_loop(), i, mode="wrap")
         else:
             mono = np.zeros(i.shape[0])
         out = np.empty((i.shape[0], self.format.channels), dtype=np.float32)
         out[:] = mono[:, None]
         return out
+
+    def _demo_loop(self) -> F32:
+        if self._loop is None:
+            loop = np.arange(LOOP_BEATS * self.beat_period)
+            self._loop = self._demo(loop).astype(np.float32)
+        return self._loop
 
     def _demo(self, i: I64) -> F64:
         sr = self.format.sample_rate

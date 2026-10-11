@@ -1,6 +1,9 @@
+import itertools
+import sys
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -187,19 +190,80 @@ def test_pause_stops_frames_and_resume_restarts_them(running):
     assert decode(out.frames[0]).host_time == pytest.approx(src.t)
 
 
+def _voluntary_switches(thread: threading.Thread) -> int:
+    status = Path(f"/proc/self/task/{thread.native_id}/status").read_text()
+    return int(next(ln for ln in status.splitlines() if ln.startswith("voluntary_ctxt")).split()[1])
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="reads /proc")
+def test_a_paused_pipeline_sleeps_through_arriving_blocks(running):
+    src, out = FakeSource(), Collector()
+    pipe = running(src, out)
+    pipe.pause()
+    src.push()
+    time.sleep(0.15)  # the analysis thread notices the pause and goes to sleep
+    analysis = next(t for t in threading.enumerate() if t.name == "tidalviz-analysis")
+    before = _voluntary_switches(analysis)
+    for _ in range(40):
+        src.push()
+        time.sleep(0.003)
+    assert _voluntary_switches(analysis) - before <= 2
+    assert not out.frames
+
+
 def test_reports_silence_after_4_seconds_and_its_end(running):
     events: list[bool] = []
     src, out = FakeSource(), Collector()
     running(src, out, on_silence=events.append)
-    n = 0
+    src.push(0.0)
+    assert out.wait(1)
     for _ in range(int(4.2 * SR / HOP)):  # 4.2 s of zeros (host time from the source clock)
         src.push(0.0)
-        n += 1
-        assert out.wait(n)
-    assert events == [True]
+    assert wait_until(lambda: events == [True])
     src.push(0.2)
-    assert out.wait(n + 1)
     assert wait_until(lambda: events == [True, False])
+
+
+def test_unchanged_silent_frames_go_out_once_a_second(running):
+    src, out = FakeSource(), Collector()
+    running(src, out)
+    src.push(0.0)
+    assert out.wait(1)
+    for _ in range(int(3.5 * SR / HOP)):
+        src.push(0.0)
+        time.sleep(0.001)  # let analysis keep up, so the keepalives land near each second
+    src.push(0.2)  # not silent: published at once, after every silent hop before it
+    assert wait_until(lambda: bool(out.frames) and not decode(out.frames[-1]).silent)
+    frames = [decode(d) for d in out.frames]
+    silent = [f.host_time for f in frames[:-1]]
+    assert all(f.silent for f in frames[:-1])
+    assert 3 <= len(silent) <= 5  # 329 silent hops: the first, then one per second
+    assert all(b - a >= 1.0 for a, b in itertools.pairwise(silent))
+    assert frames[-1].host_time == pytest.approx(src.t)
+
+
+def test_silent_frames_that_change_are_all_published(running):
+    src, out = FakeSource(), Collector()
+    running(src, out)
+    for i in range(6):
+        src.push(1e-5 * (1 + i % 2))  # below −70 dBFS: silent, but the waveform differs
+        assert out.wait(i + 1)
+    assert all(decode(d).silent for d in out.frames)
+
+
+def test_resume_sends_the_next_frame_even_if_unchanged(running):
+    # The host calls resume() on every client-count change; a new client must get a frame.
+    src, out = FakeSource(), Collector()
+    pipe = running(src, out)
+    src.push(0.0)
+    assert out.wait(1)
+    for _ in range(20):
+        src.push(0.0)
+    time.sleep(0.1)
+    assert len(out.frames) == 1
+    pipe.resume()
+    src.push(0.0)
+    assert out.wait(2)
 
 
 def test_stats_report_analysis_time_and_capture_to_send_latency(running):
@@ -242,7 +306,8 @@ def test_realtime_synthetic_source_end_to_end():
     finally:
         pipe.stop()
     frames = [decode(d) for d in out.frames]
-    assert 80 <= len(frames) <= 100  # 93.75 frames/s
+    assert 80 <= frames[-1].index + 1 <= 100  # 93.75 hops/s analyzed
+    assert len(frames) < frames[-1].index + 1  # the silence before the first click went out once
     assert any(f.onset for f in frames)
     s = pipe.stats()
     assert s.capture_to_send_ms_p95 < 15.0

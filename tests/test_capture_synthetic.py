@@ -82,3 +82,20 @@ def test_demo_is_music_like_and_bounded():
     for b in range(1, 8):
         s = b * src.beat_period
         assert np.sum(x[s : s + 2400, 0] ** 2) > 2 * np.sum(x[s - 2400 : s, 0] ** 2)
+
+
+def test_demo_blocks_are_the_formula_for_the_first_loop():
+    src = SyntheticSource("demo", channels=2)
+    loop = 16 * src.beat_period  # 4 bars: 8 s at 48 kHz
+    x = np.concatenate([src.render(512) for _ in range(loop // 512)])
+    expected = src._demo(np.arange(loop)).astype(np.float32)
+    np.testing.assert_array_equal(x[:, 0], expected)
+    np.testing.assert_array_equal(x[:, 1], expected)
+
+
+def test_demo_repeats_its_loop_from_a_bar_line():
+    src = SyntheticSource("demo", sample_rate=44100.0, channels=1)
+    loop = 16 * src.beat_period  # not a multiple of 512 at 44.1 kHz: blocks straddle the seam
+    x = np.concatenate([src.render(512) for _ in range(2 * loop // 512 + 2)])[:, 0]
+    np.testing.assert_array_equal(x[loop : 2 * loop], x[:loop])
+    np.testing.assert_array_equal(x[2 * loop :], x[: len(x) - 2 * loop])
