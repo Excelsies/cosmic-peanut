@@ -46,16 +46,6 @@ export default function create(ctx) {
   pillars.setColorAt(0, new THREE.Color()); // allocates instanceColor
   /** @type {THREE.InstancedBufferAttribute} */ (pillars.instanceColor).setUsage(THREE.DynamicDrawUsage);
   scene.add(pillars);
-  // Position and rotation never change; per frame only scale.y (matrix element 5) is written.
-  const mats = pillars.instanceMatrix.array;
-  const dummy = new THREE.Object3D();
-  for (let i = 0; i < COUNT; i++) {
-    const a = (i / COUNT) * TAU;
-    dummy.position.set(Math.cos(a) * RADIUS, 0, Math.sin(a) * RADIUS);
-    dummy.rotation.set(0, -a, 0);
-    dummy.updateMatrix();
-    pillars.setMatrixAt(i, dummy.matrix);
-  }
 
   // Mirror image under a dark glossy floor line: a second instanced mesh sharing the matrices.
   const reflectMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07, depthWrite: false });
@@ -107,6 +97,18 @@ export default function create(ctx) {
   composer.addPass(output);
   const prevToneMapping = renderer.toneMapping;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+  // Position and rotation never change; per frame only scale.y (matrix element 5) is written.
+  // Built after the stars: an Object3D draws its uuid from Math.random.
+  const mats = pillars.instanceMatrix.array;
+  const dummy = new THREE.Object3D();
+  for (let i = 0; i < COUNT; i++) {
+    const a = (i / COUNT) * TAU;
+    dummy.position.set(Math.cos(a) * RADIUS, 0, Math.sin(a) * RADIUS);
+    dummy.rotation.set(0, -a, 0);
+    dummy.updateMatrix();
+    pillars.setMatrixAt(i, dummy.matrix);
+  }
 
   // Reused per-frame scratch.
   const color = new THREE.Color();
