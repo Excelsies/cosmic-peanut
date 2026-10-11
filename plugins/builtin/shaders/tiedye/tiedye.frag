@@ -200,7 +200,8 @@ void main() {
     if (b.w <= 0.0) continue;
     float dn = length(q - b.xy) / max(b.z, 1e-3);
     dn *= 1.0 + 0.7 * (edgeN - 0.5) + 0.25 * fineN;
-    float c = (1.0 - smoothstep(0.45, 1.0, dn)) + 0.3 * exp(-pow((dn - 0.88) / 0.1, 2.0));
+    float rz = (dn - 0.88) / 0.1;
+    float c = (1.0 - smoothstep(0.45, 1.0, dn)) + 0.3 * exp(-rz * rz);
     int bi = min(int(u_bloomCol[k] * float(u_n)), u_n - 1);
     float amt = clamp(c * b.w * (1.0 - 0.7 * crinkle), 0.0, 1.0);
     // Fresh dye mostly displaces what was there (it floods the fibres), darkening only a little.
