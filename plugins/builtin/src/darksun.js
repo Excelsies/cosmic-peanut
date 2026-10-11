@@ -52,6 +52,7 @@ export default async function create(ctx) {
   const ub = bgProg.u;
   const vao = gl.createVertexArray();
   const bgTarget = createTarget(gl);
+  bgTarget.resize(1, 1); // storage even while the backdrop is off (u_bg is never sampled then)
 
   const profTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, profTex);
