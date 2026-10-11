@@ -41,7 +41,9 @@ export const CROSSFADE_MS = 1500;
 const READY_TIMEOUT_MS = 10_000;
 const REMOVE_DELAY_MS = 100; // let the SDK run dispose() before the iframe goes away
 const RING = 512;
-const THROTTLED_MAX_FPS = 25; // WebKit holds a never-clicked cross-origin iframe near 20 fps
+// WebKit holds a never-clicked cross-origin iframe near 20 fps
+const THROTTLED_MIN_FPS = 15;
+const THROTTLED_MAX_FPS = 25;
 
 /** @param {{ message: string; file?: string; line?: number }} e */
 export function formatError(e) {
@@ -78,7 +80,7 @@ export function createPluginHost(deps) {
   /** Throttled, not merely capped (Battery) or slow: below the throttle rate and the target. @param {number} fps */
   function isThrottled(fps) {
     const target = settings.fpsCap > 0 ? Math.min(60, settings.fpsCap) : 60;
-    return fps > 0 && fps <= THROTTLED_MAX_FPS && fps < 0.8 * target;
+    return fps >= THROTTLED_MIN_FPS && fps <= THROTTLED_MAX_FPS && fps < 0.8 * target;
   }
 
   function refresh() {

@@ -313,6 +313,8 @@ describe("pluginHost", () => {
     const throttled = () => events.filter((e) => e.kind === "perf").at(-1).throttled;
     perf(35); // a heavy plugin, uncapped: slow, not throttled
     expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["", false]);
+    perf(10); // too slow for the ~20 fps throttle: a click wouldn't help
+    expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["", false]);
     host.setSettings({ fpsCap: 30 }); // Battery
     perf(30);
     expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["", false]);
