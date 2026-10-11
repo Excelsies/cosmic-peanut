@@ -131,12 +131,13 @@ export default async function create(ctx) {
     uniforms: bgUniforms,
     vertexShader: bgVert,
     fragmentShader: bgFrag,
-    depthTest: false,
     depthWrite: false,
   });
+  // Drawn after the opaque creature at depth 1 (background.vert), so the depth test skips the
+  // tiling under it.
   const bg = new THREE.Mesh(quadGeo, bgMat);
   bg.frustumCulled = false;
-  bg.renderOrder = -1;
+  bg.renderOrder = 1;
   scene.add(bg);
 
   // Environment: the same shader over an equirect, then PMREM.
@@ -238,8 +239,8 @@ export default async function create(ctx) {
     chains = createChains(6, nodes);
     frames = new Float32Array(6 * nodes * 6);
     tangents = new Float32Array(6 * nodes * 3);
-    nodeData = new Float32Array(nodes * 6 * 3 * 4);
-    nodeTex = new THREE.DataTexture(nodeData, nodes, 18, THREE.RGBAFormat, THREE.FloatType);
+    nodeData = new Float32Array(nodes * 6 * 2 * 4);
+    nodeTex = new THREE.DataTexture(nodeData, nodes, 12, THREE.RGBAFormat, THREE.FloatType);
     nodeTex.magFilter = nodeTex.minFilter = THREE.NearestFilter;
     nodeTex.needsUpdate = true;
     tubeUniforms.uNodes.value = nodeTex;
@@ -356,6 +357,7 @@ export default async function create(ctx) {
   composer.addPass(bloom);
   const output = new OutputPass();
   output.material.fragmentShader = keepAlpha(output.material.fragmentShader);
+  output.needsSwap = false; // all passes work in place: no swap, so the second target is never allocated
   composer.addPass(output);
   const prevToneMapping = renderer.toneMapping;
   const prevExposure = renderer.toneMappingExposure;
@@ -468,18 +470,14 @@ export default async function create(ctx) {
         for (let j = 0; j < nodes; j++) {
           const src = (c * nodes + j) * 3;
           const f = (c * nodes + j) * 6;
-          const row0 = ((c * 3) * nodes + j) * 4;
-          const row1 = ((c * 3 + 1) * nodes + j) * 4;
-          const row2 = ((c * 3 + 2) * nodes + j) * 4;
+          const row0 = ((c * 2) * nodes + j) * 4;
+          const row1 = ((c * 2 + 1) * nodes + j) * 4;
           nodeData[row0] = chains.pos[src];
           nodeData[row0 + 1] = chains.pos[src + 1];
           nodeData[row0 + 2] = chains.pos[src + 2];
           nodeData[row1] = frames[f];
           nodeData[row1 + 1] = frames[f + 1];
           nodeData[row1 + 2] = frames[f + 2];
-          nodeData[row2] = frames[f + 3];
-          nodeData[row2 + 1] = frames[f + 4];
-          nodeData[row2 + 2] = frames[f + 5];
         }
       }
       nodeTex.needsUpdate = true;
@@ -521,6 +519,7 @@ export default async function create(ctx) {
       camera.lookAt(0, 0, 0);
 
       bloom.strength = Number(ctx.params.bloom) * 0.8;
+      bloom.enabled = bloom.strength > 0; // at 0 it adds exactly nothing
       composer.render(dt);
     },
 

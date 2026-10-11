@@ -24,6 +24,13 @@ export default function create(ctx) {
   const rgb = new Float32Array(3);
   const flash = createFlashLimiter();
   let glow = 0;
+  // What the canvas shows: in digital silence everything settles, and a frame that would draw the
+  // same values again is skipped (a 2d canvas keeps its pixels).
+  const shownLevels = new Float32Array(MAX_BARS);
+  const shownPeaks = new Float32Array(MAX_BARS);
+  let shownBright = -1;
+  let shownFlat = false;
+  let dirty = true;
 
   let count = 64;
   /** @type {CanvasGradient | string} */
@@ -90,6 +97,14 @@ export default function create(ctx) {
       const kick = audio.onset ? Math.min(1, 0.4 + audio.onsetStrength) : 0;
       glow = Math.max(kick, glow * Math.exp(-dt * 5));
       const bright = flash.step(Math.min(1, 0.25 + 0.35 * glow + 0.2 * audio.bassAtt), dt, ctx.reduceFlashing);
+      const flat = !ctx.params.waveform || isZero(audio.waveform);
+      if (!dirty && flat && shownFlat && bright === shownBright && same(levels, shownLevels, count) &&
+          same(peaks, shownPeaks, count)) return;
+      dirty = false;
+      shownFlat = flat;
+      shownBright = bright;
+      shownLevels.set(levels);
+      shownPeaks.set(peaks);
       g.clearRect(0, 0, w, h);
       g.globalAlpha = bright;
       g.fillStyle = backdrop;
@@ -148,6 +163,7 @@ export default function create(ctx) {
 
     resize() {
       rebuildStyles();
+      dirty = true;
     },
 
     params(changed) {
@@ -156,6 +172,19 @@ export default function create(ctx) {
         peaks.fill(0);
       }
       rebuildStyles();
+      dirty = true;
     },
   };
+}
+
+/** @param {Float32Array} a */
+function isZero(a) {
+  for (let i = 0; i < a.length; i++) if (a[i] !== 0) return false;
+  return true;
+}
+
+/** @param {Float32Array} a @param {Float32Array} b @param {number} n */
+function same(a, b, n) {
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) return false;
+  return true;
 }

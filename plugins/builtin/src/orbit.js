@@ -2,10 +2,11 @@
 /**
  * Orbit — 64 glowing pillars on a ring for the `three` renderer.
  *
- * One InstancedMesh (one draw call) whose per-instance scale and colour follow `audio.bands`,
- * updated through a reused Object3D/Color so the frame loop allocates nothing. The camera circles
- * the ring at a rate locked to the tempo and dips on each beat (`beatPhase`). Bloom comes from
- * `three/addons` (EffectComposer + UnrealBloomPass) at half resolution, so `autoRender` is off.
+ * One InstancedMesh (one draw call) whose per-instance scale and colour follow `audio.bands`; the
+ * frame loop writes scale.y into the prebuilt instance matrices and reuses a Color, so it allocates
+ * nothing. The camera circles the ring at a rate locked to the tempo and dips on each beat
+ * (`beatPhase`). Bloom comes from `three/addons` (EffectComposer + UnrealBloomPass) at half
+ * resolution, so `autoRender` is off.
  *
  * Transparent canvas: the scene has no background and renders over 0,0,0,0, so every pass works on
  * "light on black". UnrealBloomPass doesn't keep a meaningful alpha, so the OutputPass (already the
@@ -63,7 +64,8 @@ export default function create(ctx) {
 
   // Floor ring and a static star field (built once).
   const ringGeo = new THREE.RingGeometry(RADIUS - 0.35, RADIUS + 0.35, 128);
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, side: THREE.DoubleSide });
+  // Flat and always seen from above, so one draw (transparent DoubleSide otherwise draws twice).
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, side: THREE.DoubleSide, forceSinglePass: true });
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.rotation.x = -Math.PI / 2;
   scene.add(ring);
@@ -91,12 +93,24 @@ export default function create(ctx) {
   composer.addPass(bloom);
   const output = new OutputPass();
   output.material.fragmentShader = alphaFromBrightness(output.material.fragmentShader);
+  output.needsSwap = false; // all passes work in place: no swap, so the second target is never allocated
   composer.addPass(output);
   const prevToneMapping = renderer.toneMapping;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
 
-  // Reused per-frame scratch.
+  // Position and rotation never change; per frame only scale.y (matrix element 5) is written.
+  // Built after the stars: an Object3D draws its uuid from Math.random.
+  const mats = pillars.instanceMatrix.array;
   const dummy = new THREE.Object3D();
+  for (let i = 0; i < COUNT; i++) {
+    const a = (i / COUNT) * TAU;
+    dummy.position.set(Math.cos(a) * RADIUS, 0, Math.sin(a) * RADIUS);
+    dummy.rotation.set(0, -a, 0);
+    dummy.updateMatrix();
+    pillars.setMatrixAt(i, dummy.matrix);
+  }
+
+  // Reused per-frame scratch.
   const color = new THREE.Color();
   const base = new THREE.Color();
   const hsl = { h: 0, s: 0, l: 0 };
@@ -145,12 +159,7 @@ export default function create(ctx) {
         const v = bands[b];
         levels[i] = v > levels[i] ? v : levels[i] * keep + v * (1 - keep);
         const lv = levels[i];
-        const a = (i / COUNT) * TAU;
-        dummy.position.set(Math.cos(a) * RADIUS, 0, Math.sin(a) * RADIUS);
-        dummy.rotation.set(0, -a, 0);
-        dummy.scale.set(1, 0.08 + lv * 3.2, 1);
-        dummy.updateMatrix();
-        pillars.setMatrixAt(i, dummy.matrix);
+        mats[i * 16 + 5] = 0.08 + lv * 3.2;
         color.setHSL((hsl.h + 1 - (b / 64) * 0.16) % 1, 0.9, 0.06 + lv * 0.38);
         pillars.setColorAt(i, color);
       }
@@ -166,6 +175,7 @@ export default function create(ctx) {
       kick = audio.onset ? Math.min(1, 0.4 + audio.onsetStrength) : kick * Math.exp(-dt * 5);
       const pulse = flash.step(kick, dt, ctx.reduceFlashing);
       bloom.strength = Number(ctx.params.bloom) * (0.5 + 0.5 * pulse);
+      bloom.enabled = bloom.strength > 0; // at 0 it adds exactly nothing
 
       composer.render(dt);
     },
@@ -180,6 +190,7 @@ export default function create(ctx) {
       renderer.toneMapping = prevToneMapping;
       composer.dispose();
       bloom.dispose();
+      output.dispose();
       for (const g of [pillarGeo, coreGeo, ringGeo, starGeo]) g.dispose();
       for (const m of [pillarMat, reflectMat, coreMat, ringMat, starMat]) m.dispose();
       pillars.dispose();
