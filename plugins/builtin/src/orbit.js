@@ -183,6 +183,7 @@ export default function create(ctx) {
       renderer.toneMapping = prevToneMapping;
       composer.dispose();
       bloom.dispose();
+      output.dispose();
       for (const g of [pillarGeo, coreGeo, ringGeo, starGeo]) g.dispose();
       for (const m of [pillarMat, reflectMat, coreMat, ringMat, starMat]) m.dispose();
       pillars.dispose();
