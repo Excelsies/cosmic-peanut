@@ -49,6 +49,9 @@ class Onset:
         self._rise: F32 = np.zeros(
             n_loc // self.LOCALIZE_BLOCK - self.LOCALIZE_LOOKBACK, dtype=np.float32
         )
+        self._lookback = np.lib.stride_tricks.sliding_window_view(
+            self._energy[:-1], self.LOCALIZE_LOOKBACK
+        )
         self._i = SCALAR_INDEX["onsetStrength"]
         self._i_age = SCALAR_INDEX["onsetAge"]
         self._last_time: float | None = None
@@ -93,8 +96,7 @@ class Onset:
         lb = self.LOCALIZE_LOOKBACK
         np.square(ctx.mono[-self._loc_n :], out=self._sq)
         np.sum(self._sq.reshape(-1, self.LOCALIZE_BLOCK), axis=1, out=self._energy)
-        windows = np.lib.stride_tricks.sliding_window_view(self._energy[:-1], lb)
-        np.max(windows, axis=1, out=self._rise)
+        np.max(self._lookback, axis=1, out=self._rise)
         np.subtract(self._energy[lb:], self._rise, out=self._rise)
         k = int(np.argmax(self._rise)) + lb
         return (self._loc_n - k * self.LOCALIZE_BLOCK) / ctx.sample_rate
@@ -126,7 +128,7 @@ class Tempo:
     def __init__(self, ctx: AnalysisContext) -> None:
         h = self.HISTORY
         self._fps = 1.0 / ctx.dt
-        self._env: F32 = np.zeros(h, dtype=np.float32)  # circular
+        self._env = np.zeros(h, dtype=np.float64)  # circular; float64 like _lin (no casting)
         self._pos = 0
         self._frames = 0
         # float64/complex128 throughout: numpy's FFT then needs no scratch allocations.
@@ -138,6 +140,8 @@ class Tempo:
         lo = math.ceil(self._fps * 60.0 / self.MAX_BPM)
         hi = math.floor(self._fps * 60.0 / self.MIN_BPM)
         self._lags = np.arange(lo, hi + 1)
+        self._lags2 = 2 * self._lags
+        assert self._lags[0] >= 0 and self._lags2[-1] < self._acfm.size  # take(mode="clip")
         bpm = 60.0 * self._fps / self._lags
         self._prior = np.exp(-0.5 * (np.log2(bpm / self.PRIOR_BPM) / self.PRIOR_OCTAVES) ** 2)
         self._score = np.zeros(self._lags.size, dtype=np.float64)
@@ -173,7 +177,7 @@ class Tempo:
         self._lin[: h - p] = self._env[p:]
         self._lin[h - p : h] = self._env[:p]
         body = self._lin[:h]
-        np.subtract(body, float(np.mean(body)), out=body)
+        np.subtract(body, float(np.add.reduce(body)) / h, out=body)
 
     def _estimate(self, ctx: AnalysisContext) -> None:
         self._ordered()
@@ -194,8 +198,8 @@ class Tempo:
         np.maximum(acf[:-2], acf[1:-1], out=m[1:-1])
         np.maximum(m[1:-1], acf[2:], out=m[1:-1])
         lags = self._lags
-        np.take(m, lags, out=self._score)
-        np.take(m, 2 * lags, out=self._tmp)
+        np.take(m, lags, out=self._score, mode="clip")
+        np.take(m, self._lags2, out=self._tmp, mode="clip")
         np.multiply(self._tmp, 0.5, out=self._tmp)
         np.add(self._score, self._tmp, out=self._score)
         np.multiply(self._score, self._prior, out=self._score)

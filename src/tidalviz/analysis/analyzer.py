@@ -9,7 +9,7 @@ Cost model: the analysis thread wakes every ~10.7 ms for well under a millisecon
 it always runs on cold caches and each numpy call costs ~3–8 µs rather than ~1 µs. The hot
 path is written to make as few numpy calls as possible: the window is a zero-copy view of the
 ring, the frame's waveform planes are views of it, and centroid, flux and bass/mid/treb all
-come from one small matrix product.
+come from one small matrix-vector product and one sum.
 """
 
 from typing import Protocol
@@ -26,7 +26,7 @@ F64 = NDArray[np.float64]
 
 BASS_MID_TREB_HZ = ((20.0, 250.0), (250.0, 4000.0), (4000.0, 16000.0))
 
-# Columns of AnalysisContext.sums, all from one matrix product per hop.
+# Entries of AnalysisContext.sums, all from one matrix-vector product per hop.
 SUM_MAG, SUM_FREQ, SUM_BASS, SUM_MID, SUM_TREB = range(5)
 
 
@@ -45,28 +45,30 @@ class AnalysisContext:
         self.bin_hz = sample_rate / n
         self.freqs: F32 = np.fft.rfftfreq(n, 1.0 / sample_rate).astype(np.float32)
         # Hann window with the magnitude scale folded in (a full-scale sine reads 1.0 at its
-        # peak bin). The spectrum path is float32 end to end: no casting ufunc loops (numpy
-        # sets up a buffered iterator for those, which is most of a small call's cost).
+        # peak bin). Each ufunc sees one dtype; conversions to and from the float64 FFT go
+        # through copyto (a mixed-dtype ufunc allocates a casting buffer every call).
         hann = np.hanning(n)
         self.window: F32 = (hann * (2.0 / float(np.sum(hann)))).astype(np.float32)
         self._mix: F32 = np.full(channels, 1.0 / channels, dtype=np.float32)
         self.pcm: F32 = np.zeros((channels, n), dtype=np.float32)  # planar; a ring view per hop
         self.mono: F32 = np.zeros(n, dtype=np.float32)  # pcm[0] itself when mono
+        self._windowed32: F32 = np.zeros(n, dtype=np.float32)
         self.windowed: F64 = np.zeros(n, dtype=np.float64)  # float32 input makes the FFT allocate
         self.spec = np.zeros(nb, dtype=np.complex128)
+        self._mag64: F64 = np.zeros(nb, dtype=np.float64)
         # Rows 0 and 1 alternate as this hop's and the previous hop's magnitude (no copy); row 2
         # is their elementwise minimum, for flux. Linear amplitude, not gained.
         self._mags: F32 = np.zeros((3, nb), dtype=np.float32)
         self.mag: F32 = self._mags[0]
         self.prev_mag: F32 = self._mags[1]
-        # (bins, 5): ones, frequency / Nyquist, and the bass, mid and treble bin masks.
-        cols = np.zeros((nb, 5), dtype=np.float32)
-        cols[:, SUM_MAG] = 1.0
-        cols[:, SUM_FREQ] = self.freqs / (sample_rate / 2)
+        # (5, bins): ones, frequency / Nyquist, and the bass, mid and treble bin masks.
+        cols = np.zeros((5, nb), dtype=np.float32)
+        cols[SUM_MAG] = 1.0
+        cols[SUM_FREQ] = self.freqs / (sample_rate / 2)
         for c, (lo, hi) in zip((SUM_BASS, SUM_MID, SUM_TREB), BASS_MID_TREB_HZ, strict=True):
-            cols[int(np.ceil(lo / self.bin_hz)) : min(int(np.ceil(hi / self.bin_hz)), nb), c] = 1
+            cols[c, int(np.ceil(lo / self.bin_hz)) : min(int(np.ceil(hi / self.bin_hz)), nb)] = 1
         self._cols = cols
-        self._sums: F32 = np.zeros((3, 5), dtype=np.float32)
+        self._sums: F32 = np.zeros((2, 5), dtype=np.float32)  # alternate like _mags rows 0, 1
         self.sums: F32 = self._sums[0]  # Σ mag · column, this hop (SUM_* indices)
         self.prev_sums: F32 = self._sums[1]  # the same for the previous hop
         self.sum_min = 0.0  # Σ min(mag, prev_mag)
@@ -89,16 +91,18 @@ class AnalysisContext:
             self.mono = pcm[0]
         else:
             np.matmul(self._mix, pcm, out=self.mono)
-        np.multiply(self.mono, self.window, out=self.windowed)
+        np.multiply(self.mono, self.window, out=self._windowed32)
+        np.copyto(self.windowed, self._windowed32)
         rfft(self.windowed, self.spec)
         mags, sums = self._mags, self._sums
         cur = self.index & 1
         self.mag, self.prev_mag = mags[cur], mags[cur ^ 1]
         self.sums, self.prev_sums = sums[cur], sums[cur ^ 1]
-        np.abs(self.spec, out=self.mag)
+        np.abs(self.spec, out=self._mag64)
+        np.copyto(self.mag, self._mag64)
         np.minimum(mags[0], mags[1], out=mags[2])
-        np.matmul(mags, self._cols, out=sums)
-        self.sum_min = float(sums[2, SUM_MAG])
+        np.matmul(self._cols, self.mag, out=self.sums)  # the previous row is last hop's
+        self.sum_min = float(np.add.reduce(mags[2]))
 
 
 class FeatureExtractor(Protocol):

@@ -235,15 +235,20 @@ def test_hot_path_allocates_nothing_per_frame_beyond_small_scalars():
     for b in blocks[:300]:  # warm up past tempo lock (its one-time comb allocates)
         ring.write(b, 0.0)
         an.process(ring, ring.written / 48000.0)
+    hot = iter(blocks[300:])
     tracemalloc.start()
+    for _ in range(16):  # traced warm-up: the views kept between hops become traced objects
+        ring.write(next(hot), 0.0)
+        an.process(ring, ring.written / 48000.0)
     base, _ = tracemalloc.get_traced_memory()
-    for b in blocks[300:]:
+    tracemalloc.reset_peak()
+    for b in hot:
         ring.write(b, 0.0)
         an.process(ring, ring.written / 48000.0)
     cur, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     assert cur - base < 4096  # nothing retained
-    assert peak - base < 16384  # no per-frame arrays (a 2048-sample float32 array is 8 KB)
+    assert peak - base < 2048  # no per-frame arrays or ufunc buffers (one float32 hop is 2 KB)
 
 
 def test_bass_mid_treb_are_near_one_from_the_first_seconds():

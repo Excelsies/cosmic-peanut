@@ -34,10 +34,10 @@ class Level:
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
         hop = ctx.mono[-ctx.hop :]
         ctx.hop_ms = float(np.dot(hop, hop)) / ctx.hop  # mean square, shared with AutoGain
-        pcm = ctx.pcm[:, -ctx.hop :]
-        peak = max(
-            float(np.maximum.reduce(pcm, axis=None)), -float(np.minimum.reduce(pcm, axis=None))
-        )
+        peak = 0.0
+        for row in ctx.pcm:  # 1-D reduces: a strided 2-D reduce allocates a buffer
+            seg = row[-ctx.hop :]
+            peak = max(peak, float(np.maximum.reduce(seg)), -float(np.minimum.reduce(seg)))
         rms = math.sqrt(ctx.hop_ms)
         out.scalars[self._i_rms] = rms
         out.scalars[self._i_peak] = peak
@@ -155,6 +155,7 @@ class Bands:
         self._starts = starts
         self._vals: F32 = np.zeros(self._idx.size, dtype=np.float32)
         self._power: F32 = np.ones(nb + 1, dtype=np.float32)  # [nb] stays 1.0
+        assert self._idx.min() >= 0 and self._idx.max() < self._power.size  # take(mode="clip")
         self._x: F32 = np.zeros(s.n_bands, dtype=np.float32)
         self._lv: F32 = np.zeros(s.n_bands, dtype=np.float32)
         self._level_floor = np.float32(-10.0 / db_range)  # Onset sees down to floor − 10 dB
@@ -169,7 +170,7 @@ class Bands:
         ctx.prev_band_level = self._levels[cur ^ 1]
         np.multiply(ctx.mag, ctx.gain, out=power)
         np.square(power, out=power)
-        np.take(self._power, self._idx, out=self._vals)
+        np.take(self._power, self._idx, out=self._vals, mode="clip")  # "raise" buffers out
         np.multiply(self._vals, self._wts, out=self._vals)
         np.add.reduceat(self._vals, self._starts, out=x)
         np.log10(x, out=x)
