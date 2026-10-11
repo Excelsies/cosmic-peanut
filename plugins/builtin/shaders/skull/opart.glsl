@@ -10,7 +10,9 @@ uniform float u_phase;      // global phase (mod 2π), streams the stripes outwa
 uniform float u_flow;       // warp-field clock
 uniform float u_warp;       // Warp param (effective)
 uniform float u_duty;       // stripe threshold: > 0 fattens the black bands
-uniform vec4 u_outline;     // skull outline: screen units per object unit, tilt, jaw drop, -
+uniform vec4 u_outline;     // skull outline: screen units per object unit, -, jaw drop, -
+uniform vec2 u_tilt;        // (cos, sin) of the outline's rotation (−tilt)
+uniform float u_swirl;      // sin(0.6 · u_flow + 1): the whirlpool's slow swing
 uniform vec2 u_ripples[8];  // (radius, amplitude) per beat ripple
 uniform float u_wave[32];   // slew-limited waveform, mirrored left/right around the skull
 uniform vec3 u_ink;
@@ -66,7 +68,7 @@ float sdEllipse2(vec2 p, vec2 r) {
 
 // Signed distance (screen units) to the skull's silhouette, roughly: cranium plus jaw.
 float outline(vec2 q) {
-  vec2 o = rot2(q, -u_outline.y) / u_outline.x;
+  vec2 o = vec2(u_tilt.x * q.x - u_tilt.y * q.y, u_tilt.y * q.x + u_tilt.x * q.y) / u_outline.x;
   float cranium = sdEllipse2(o - vec2(0.0, 0.2), vec2(0.95, 1.0));
   float jaw = sdEllipse2(o - vec2(0.0, -0.72 - u_outline.z), vec2(0.52, 0.34));
   return smin(cranium, jaw, 0.3) * u_outline.x;
@@ -79,7 +81,7 @@ float opField(vec2 p) {
   vec2 o = vec2(fbm(q * 0.8 + vec2(0.0, 0.5 * u_flow)), fbm(q * 0.8 + vec2(5.2 - 0.4 * u_flow, 1.3)));
   q += u_warp * 0.42 * (o * 2.0 - 1.0);
   float r = length(q);
-  q = rot2(q, u_warp * 1.3 * exp(-0.8 * r) * sin(0.6 * u_flow + 1.0));
+  q = rot2(q, u_warp * 1.3 * exp(-0.8 * r) * u_swirl);
   return outline(q) + 0.25 * u_warp * (fbm(q * 1.6 - vec2(0.3 * u_flow, 0.0)) - 0.5);
 }
 
@@ -95,6 +97,7 @@ float ripplePhase(vec2 p) {
   float d = max(outline(p), 0.0);
   float s = 0.0;
   for (int i = 0; i < 8; i++) {
+    if (u_ripples[i].y == 0.0) continue; // spent
     float x = (d - u_ripples[i].x) / RIPPLE_WIDTH;
     s += u_ripples[i].y * exp(-x * x);
   }

@@ -89,7 +89,9 @@ export default async function create(ctx) {
     gl.uniform1f(u.u_flow, drive.flow);
     gl.uniform1f(u.u_warp, eff.warp);
     gl.uniform1f(u.u_duty, drive.duty);
-    gl.uniform4f(u.u_outline, outlineScale, motion.roll, 0.55 * Math.sin(motion.jaw), 0);
+    gl.uniform4f(u.u_outline, outlineScale, 0, 0.55 * Math.sin(motion.jaw), 0);
+    gl.uniform2f(u.u_tilt, Math.cos(-motion.roll), Math.sin(-motion.roll));
+    gl.uniform1f(u.u_swirl, Math.sin(0.6 * drive.flow + 1));
     gl.uniform3f(u.u_ink, colors[0], colors[1], colors[2]);
     gl.uniform3f(u.u_paper, colors[3], colors[4], colors[5]);
     gl.uniform1f(u.u_paperAlpha, look.paperAlpha);
