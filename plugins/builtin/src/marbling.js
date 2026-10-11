@@ -192,8 +192,6 @@ export default async function create(ctx) {
       const ink = inks[cur];
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
       bindPrev(comp, ink.tex, ink.w, ink.h, 0);
       gl.uniform2f(comp.u.u_size, w, h);
       gl.uniform3fv(comp.u.u_ink, inkColors);

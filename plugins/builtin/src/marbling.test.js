@@ -111,4 +111,10 @@ describe("marbling redraws", () => {
     expect(drawn).toBeGreaterThan(10);
     expect(drawn).toBeLessThan(400);
   });
+
+  it("draws over the whole canvas without clearing it first", async () => {
+    const s = await setup();
+    frame(s);
+    expect(frame(s, audioFrame({ silent: false, onset: true })).filter((c) => c.op === "clear")).toEqual([]);
+  });
 });

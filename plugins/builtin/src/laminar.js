@@ -381,8 +381,6 @@ export default async function create(ctx) {
       const sy = 0.5 + ox * sa + oy * ca;
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, cw, ch);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
       gl.useProgram(compP.program);
       bind(0, scal[scur].tex);
       const u = compP.u;

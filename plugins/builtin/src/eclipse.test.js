@@ -78,4 +78,10 @@ describe("eclipse GL calls", () => {
     expect(mask?.args[1]).toBeGreaterThanOrEqual(4 * texel);
     expect(mask?.args[1]).toBeLessThan(5 * texel);
   });
+
+  it("draws over the whole canvas without clearing it first", async () => {
+    const s = await setup();
+    frame(s, 0);
+    expect(frame(s, 1).filter((c) => c.op === "clear")).toEqual([]);
+  });
 });

@@ -145,8 +145,6 @@ export default async function create(ctx) {
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SECTORS, 2, gl.RED, gl.FLOAT, upload);

@@ -146,6 +146,12 @@ describe("laminar GL calls", () => {
       "composite.u_scal": 0,
     });
   });
+
+  it("draws over the whole canvas without clearing it first", async () => {
+    const s = await setup();
+    frame(s);
+    expect(frame(s).filter((c) => c.op === "clear")).toEqual([]);
+  });
 });
 
 describe("laminar sim targets", () => {
