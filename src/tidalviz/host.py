@@ -21,6 +21,7 @@ import psutil
 
 from tidalviz.bench import BenchRecorder
 from tidalviz.capture import (
+    AudioApp,
     AudioSource,
     SyntheticSource,
     app_source,
@@ -76,17 +77,26 @@ def open_url(url: str) -> None:
     subprocess.run(["/usr/bin/open", url], check=False)
 
 
-def make_source(source_id: str) -> AudioSource:
-    """`system`, `app:<pid>` or `synthetic:<kind>` → a capture source."""
+def make_source(source_id: str, apps: Sequence[AudioApp] | None = None) -> AudioSource:
+    """`system`, `app:<pid>` or `synthetic:<kind>` → a capture source. ``apps`` reuses a listing."""
     if source_id == "system":
         return system_source()
     if source_id.startswith("app:"):
         pid = int(source_id.removeprefix("app:"))
-        app = next(a for a in list_audio_apps() if a.pid == pid)
+        app = next(a for a in (list_audio_apps() if apps is None else apps) if a.pid == pid)
         return app_source(app)
     if source_id.startswith("synthetic:"):
         return SyntheticSource(source_id.removeprefix("synthetic:"))
     raise ValueError(f"unknown source {source_id!r}")
+
+
+def audio_apps() -> list[AudioApp]:
+    """Blocking (pw-dump, or a Core Audio query): run it off the event loop."""
+    try:
+        return list_audio_apps()
+    except Exception:
+        log.exception("listing audio apps failed")
+        return []
 
 
 class Host:
@@ -131,6 +141,7 @@ class Host:
         self._throttled: bool | None = None
         self._tasks: set[asyncio.Future[Any]] = set()
         self._notices: list[dict[str, Any]] = []  # sent to the next shell after its hello
+        self._source_request = 0  # the latest setSource wins, whichever listing finishes first
         # Onset frames published (index, host time) — appended on the analysis thread; deque
         # appends are atomic. Latency = when the shell reports seeing one, minus its time.
         self._onsets: deque[tuple[int, float]] = deque(maxlen=64)
@@ -255,16 +266,13 @@ class Host:
             )
         return out
 
-    def sources(self) -> list[dict[str, str]]:
+    def sources(self, apps: Sequence[AudioApp]) -> list[dict[str, str]]:
         out = [{"id": "system", "name": "All audio"}]
-        try:
-            out += [{"id": a.id, "name": a.name} for a in list_audio_apps()]
-        except Exception:
-            log.exception("listing audio apps failed")
+        out += [{"id": a.id, "name": a.name} for a in apps]
         out.append({"id": "synthetic:demo", "name": "Demo (synthetic)"})
         return out
 
-    def hello(self) -> dict[str, Any]:
+    def hello(self, apps: Sequence[AudioApp]) -> dict[str, Any]:
         s = self.settings.data
         return {
             "type": "hello",
@@ -273,7 +281,7 @@ class Host:
             "visualizers": self.visualizers(),
             "repos": self.registry.repos(),
             "settings": {k: v for k, v in s.items() if k not in ("params", "window")},
-            "sources": self.sources(),
+            "sources": self.sources(apps),
             "activeSource": s["source"],
             "active": s["active"],
             "dev": self.dev,
@@ -285,7 +293,8 @@ class Host:
         self._spawn(self._greet(client))
 
     async def _greet(self, client: TextSocket) -> None:
-        await self.servers.control.send_json(client, self.hello())
+        apps = await asyncio.to_thread(audio_apps)
+        await self.servers.control.send_json(client, self.hello(apps))
         notices, self._notices = self._notices, []
         for msg in notices:
             await self.servers.control.send_json(client, msg)
@@ -334,7 +343,7 @@ class Host:
             case "onsetSeen":
                 self._onset_seen(msg["frameIndex"])
             case "setSource":
-                self._set_source(msg["id"])
+                self._spawn(self._set_source(msg["id"]))
             case "enable":
                 self.registry.enable(msg["key"])
                 self._spawn(self._broadcast_visualizers())
@@ -395,27 +404,24 @@ class Host:
             }
         )
 
-    def _set_source(self, source_id: str) -> None:
+    async def _set_source(self, source_id: str) -> None:
+        self._source_request += 1
+        request = self._source_request
+        apps = await asyncio.to_thread(audio_apps)  # one listing for the source and the broadcast
+        if request != self._source_request:
+            return
         try:
-            source = make_source(source_id)
+            source = make_source(source_id, apps)
         except (ValueError, StopIteration):
-            self._spawn(
-                self.servers.control.broadcast_json(
-                    {
-                        "type": "status",
-                        "level": "error",
-                        "text": f"Unknown audio source: {source_id}",
-                    }
-                )
+            await self.servers.control.broadcast_json(
+                {"type": "status", "level": "error", "text": f"Unknown audio source: {source_id}"}
             )
             return
         if self.pipeline is not None:
             self.pipeline.switch_source(source)
         self.settings.update({"source": source_id})
-        self._spawn(
-            self.servers.control.broadcast_json(
-                {"type": "sources", "sources": self.sources(), "active": source_id}
-            )
+        await self.servers.control.broadcast_json(
+            {"type": "sources", "sources": self.sources(apps), "active": source_id}
         )
 
     def _onset_seen(self, index: int) -> None:

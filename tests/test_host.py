@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sys
+import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -300,6 +301,67 @@ async def test_saved_app_source_that_is_gone_falls_back_to_system_audio(
         assert status["level"] == "warn" and "app:999999" in status["text"]
     finally:
         await h.stop()
+
+
+@pytest.fixture
+def player(monkeypatch: pytest.MonkeyPatch) -> list[threading.Thread]:
+    """One audio app; records the thread of each listing. Its capture is a synthetic stand-in."""
+    from tidalviz import host as host_module
+    from tidalviz.capture import AudioApp, SyntheticSource
+
+    threads: list[threading.Thread] = []
+
+    def list_audio_apps() -> list[AudioApp]:
+        threads.append(threading.current_thread())
+        return [AudioApp(id="app:4242", name="Player", pid=4242)]
+
+    monkeypatch.setattr(host_module, "list_audio_apps", list_audio_apps)
+    monkeypatch.setattr(host_module, "app_source", lambda app: SyntheticSource("click120"))
+    return threads
+
+
+@pytest.mark.asyncio
+async def test_audio_apps_are_listed_off_the_loop_once_per_hello_and_switch(
+    host: Host, http, player: list[threading.Thread]
+):
+    shell = await connect(host, http)
+    hello = await shell.next_json("hello")
+    assert {"id": "app:4242", "name": "Player"} in hello["sources"]
+    await shell.send({"type": "setSource", "id": "app:4242"})
+    msg = await shell.next_json("sources")
+    assert msg["active"] == "app:4242" and {"id": "app:4242", "name": "Player"} in msg["sources"]
+    assert getattr(host.pipeline.source, "kind", None) == "click120"
+    assert len(player) == 2  # pw-dump once for hello, once for the switch
+    assert threading.current_thread() not in player
+
+
+@pytest.mark.asyncio
+async def test_the_last_requested_source_wins_when_listings_finish_out_of_order(
+    host: Host, http, monkeypatch: pytest.MonkeyPatch
+):
+    from tidalviz import host as host_module
+
+    release = threading.Event()
+    calls = 0
+
+    def list_audio_apps() -> list[Any]:
+        nonlocal calls
+        calls += 1
+        if calls == 2:  # the first switch's listing finishes after the second's
+            release.wait(2)
+        return []
+
+    monkeypatch.setattr(host_module, "list_audio_apps", list_audio_apps)
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await shell.send({"type": "setSource", "id": "synthetic:sine1k"})
+    await asyncio.sleep(0.05)
+    await shell.send({"type": "setSource", "id": "synthetic:click120"})
+    assert (await shell.next_json("sources"))["active"] == "synthetic:click120"
+    release.set()
+    await asyncio.sleep(0.1)
+    assert host.settings.data["source"] == "synthetic:click120"
+    assert getattr(host.pipeline.source, "kind", None) == "click120"
 
 
 @pytest.mark.asyncio
