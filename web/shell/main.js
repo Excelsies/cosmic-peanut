@@ -8,7 +8,7 @@ if (!root) throw new Error("missing #app");
 
 /** @type {ReturnType<typeof createConnection> | null} */
 let conn = null;
-const app = createApp({ root, send: (m) => conn?.send(m) ?? false, dpr: window.devicePixelRatio || 1 });
+const app = createApp({ root, send: (m) => conn?.send(m) ?? false });
 conn = createConnection({
   location: window.location,
   fetch: (url) => fetch(url, { cache: "no-store" }),

@@ -104,6 +104,18 @@ async function start(opts, init, port, load) {
     window.addEventListener("resize", () => rt.setCssSize(canvas.clientWidth, canvas.clientHeight));
   }
 
+  // A DPR change (window moved to another monitor) resizes nothing; watch for it explicitly.
+  const watchDpr = () =>
+    window.matchMedia?.(`(resolution: ${window.devicePixelRatio || 1}dppx)`).addEventListener(
+      "change",
+      () => {
+        rt.dprChanged();
+        watchDpr();
+      },
+      { once: true },
+    );
+  watchDpr();
+
   await rt.start();
   return rt;
 }

@@ -213,7 +213,7 @@ Shell → SDK (port):
 
 | Message | Notes |
 | --- | --- |
-| `{type:"tidalviz:init", params, quality, renderScaleMax, maxDpr, fpsCap, reduceFlashing, visible}` | Via `window.postMessage` with the port. `maxDpr`: auto/high = native, balanced ≤ 1.5, battery ≤ 1; `fpsCap`: 0 = uncapped, battery = 30; `renderScaleMax`: 1 |
+| `{type:"tidalviz:init", params, quality, renderScaleMax, maxDpr, fpsCap, reduceFlashing, visible}` | Via `window.postMessage` with the port. `maxDpr`: auto/high = 0 (native), balanced 1.5, battery 1 (the SDK applies min(live `devicePixelRatio`, `maxDpr`) and re-sizes when the DPR changes); `fpsCap`: 0 = uncapped, battery = 30; `renderScaleMax`: 1 |
 | `ArrayBuffer` | A binary v1 frame, **transferred** (the shell keeps no reference). During a crossfade the second iframe gets a copy |
 | `{type:"params", changed}` | |
 | `{type:"settings", quality?, maxDpr?, fpsCap?, reduceFlashing?}` | |

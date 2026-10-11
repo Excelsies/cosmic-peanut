@@ -333,6 +333,17 @@ describe("runtime sizing and quality", () => {
     expect([h.canvas.width, h.canvas.height]).toEqual([800, 600]);
   });
 
+  it("re-sizes when the device pixel ratio changes (window moved to another monitor)", async () => {
+    const plugin = { frame: vi.fn(), resize: vi.fn() };
+    const o = { plugin, dpr: 1 };
+    const h = harness(o);
+    await h.rt.start();
+    o.dpr = 2;
+    h.rt.dprChanged();
+    expect(plugin.resize).toHaveBeenCalledTimes(1);
+    expect([h.canvas.width, h.canvas.height]).toEqual([1600, 1200]);
+  });
+
   it("setCssSize updates ctx.size before resize, and skips no-op resizes", async () => {
     const plugin = { frame: vi.fn(), resize: vi.fn() };
     const h = harness({ plugin, dpr: 1 });

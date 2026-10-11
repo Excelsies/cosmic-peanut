@@ -27,7 +27,6 @@ import { VISUAL_OPACITY_MIN } from "./validate.js";
  * @property {HTMLElement} root
  * @property {(msg: object) => boolean} send
  * @property {(deps: import("./pluginHost.js").PluginHostDeps) => PluginHost} [createPluginHost]
- * @property {number} [dpr]
  */
 
 const IDLE_MS = 3000;
@@ -48,7 +47,6 @@ const cycleLabel = (s) => (s === 0 ? "Off" : s < 60 ? `Every ${s} s` : `Every ${
 export function createApp(deps) {
   const { root, send } = deps;
   const doc = root.ownerDocument;
-  const dpr = deps.dpr ?? 1;
 
   // ---- state -------------------------------------------------------------------------------
   /** @type {VizInfo[]} */ let visualizers = [];
@@ -225,7 +223,7 @@ export function createApp(deps) {
   // ---- plugin host ---------------------------------------------------------------------------
   const pluginHost = (deps.createPluginHost ?? createPluginHost)({
     container: vizLayer,
-    settings: { quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, dpr) },
+    settings: { quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality) },
     visible: () => doc.visibilityState !== "hidden",
     onEvent,
   });
@@ -403,7 +401,7 @@ export function createApp(deps) {
   function setQuality(q) {
     settings.quality = q;
     send({ type: "settings", quality: q });
-    pluginHost.setSettings({ quality: q, ...qualityProfile(q, dpr) });
+    pluginHost.setSettings({ quality: q, ...qualityProfile(q) });
   }
 
   function armCycle() {
@@ -664,7 +662,7 @@ export function createApp(deps) {
         dev = msg.dev;
         for (const v of visualizers) if (!values.has(v.key)) values.set(v.key, v.values);
         Object.assign(settings, msg.settings);
-        pluginHost.setSettings({ quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, dpr) });
+        pluginHost.setSettings({ quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality) });
         hud.setVisible(settings.hudVisible);
         applyTransparent();
         applyOpacity();

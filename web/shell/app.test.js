@@ -63,7 +63,7 @@ function setup() {
   const { host, create } = fakeHost();
   /** @type {any[]} */
   const sent = [];
-  const app = createApp({ root, send: (m) => (sent.push(m), true), createPluginHost: create, dpr: 2 });
+  const app = createApp({ root, send: (m) => (sent.push(m), true), createPluginHost: create });
   /** @param {string} key @param {Partial<KeyboardEventInit>} [o] */
   const press = (key, o = {}) => document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...o }));
   const last = (/** @type {string} */ type) => sent.filter((m) => m.type === type).at(-1);
@@ -80,7 +80,7 @@ describe("app: hello and selection", () => {
     expect(root.querySelectorAll("#library .card")).toHaveLength(3);
     expect(host.show).toHaveBeenCalledWith(A, { hue: 120 });
     expect(root.querySelector(".now-name")?.textContent).toBe("Bars");
-    expect(host.deps.settings).toMatchObject({ quality: "auto", maxDpr: 2, fpsCap: 0, reduceFlashing: true });
+    expect(host.deps.settings).toMatchObject({ quality: "auto", maxDpr: 0, fpsCap: 0, reduceFlashing: true });
   });
 
   it("with no active visualizer picks the first enabled one and persists it", () => {

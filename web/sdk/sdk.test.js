@@ -97,6 +97,30 @@ describe("boot", () => {
     ]);
   });
 
+  it("re-sizes the canvas when the device pixel ratio changes", async () => {
+    /** @type {Map<string, () => void>} */
+    const listeners = new Map();
+    const matchMedia = vi.fn((/** @type {string} */ query) => ({
+      matches: false,
+      addEventListener: (/** @type {string} */ _type, /** @type {() => void} */ fn) => listeners.set(query, fn),
+    }));
+    vi.stubGlobal("matchMedia", matchMedia);
+    vi.stubGlobal("devicePixelRatio", 1);
+    try {
+      const booted = boot(OPTS, { importModule: env({ frame: vi.fn() }).importModule });
+      sendInit(INIT, [fakePort()]);
+      await booted;
+      const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("canvas"));
+      const w1 = canvas.width;
+      vi.stubGlobal("devicePixelRatio", 2);
+      listeners.get("(resolution: 1dppx)")?.();
+      expect(canvas.width).toBe(w1 * 2);
+      expect(listeners.has("(resolution: 2dppx)")).toBe(true); // watches the next change
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("handles webglcontextlost / restored on the canvas", async () => {
     const plugin = { frame: vi.fn(), dispose: vi.fn() };
     const e = env(plugin);

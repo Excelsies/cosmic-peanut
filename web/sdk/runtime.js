@@ -454,6 +454,10 @@ export function createRuntime(deps) {
     reportError(err) {
       postError(err, false);
     },
+    /** devicePixelRatio changed (the window moved to another monitor). */
+    dprChanged() {
+      if (plugin) resize();
+    },
     /**
      * The canvas's CSS size changed (ResizeObserver).
      * @param {number} width
