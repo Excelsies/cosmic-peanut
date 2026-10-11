@@ -182,7 +182,7 @@ Host → shell:
 | `sources` | `sources: SourceInfo[]`, `active` |
 | `status` | `level: "info"\|"warn"\|"error"`, `text` (plain text), `id?` |
 | `silence` | `silent: bool`, `seconds` — permission hint after 4 s of silence |
-| `stats` | `hostCpu`, `rssMb`, `analysisMsP50`, `captureToSendMsP95`, `droppedFrames`, `latencyMsP95?` (1/s) |
+| `stats` | `hostCpu` (% of one core: the whole host process, WebKit UI work included), `rssMb`, `analysisMsP50`, `captureToSendMsP95`, `droppedFrames`, `latencyMsP95?` (1/s) |
 | `installPrompt` | `id`, `url`, `commit`, `visualizers: {id,name}[]` — trust prompt |
 | `installResult` | `id`, `ok`, `error?` |
 | `updates` | `repos: {repo, commit, message}[]` |
