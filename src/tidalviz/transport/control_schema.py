@@ -51,6 +51,8 @@ _SCHEMAS: dict[str, dict[str, tuple[Check, bool]]] = {
         "reduceFlashing": (_bool, False),
         "autoCycleSeconds": (_num, False),
         "hudVisible": (_bool, False),
+        "backgroundOpacity": (_num, False),
+        "visualOpacity": (_num, False),
     },
     "pluginError": {
         "key": (_str, True),
