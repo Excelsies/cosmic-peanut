@@ -1,6 +1,8 @@
+import sys
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -185,6 +187,27 @@ def test_pause_stops_frames_and_resume_restarts_them(running):
     src.push()
     assert out.wait(1)
     assert decode(out.frames[0]).host_time == pytest.approx(src.t)
+
+
+def _voluntary_switches(thread: threading.Thread) -> int:
+    status = Path(f"/proc/self/task/{thread.native_id}/status").read_text()
+    return int(next(ln for ln in status.splitlines() if ln.startswith("voluntary_ctxt")).split()[1])
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="reads /proc")
+def test_a_paused_pipeline_sleeps_through_arriving_blocks(running):
+    src, out = FakeSource(), Collector()
+    pipe = running(src, out)
+    pipe.pause()
+    src.push()
+    time.sleep(0.15)  # the analysis thread notices the pause and goes to sleep
+    analysis = next(t for t in threading.enumerate() if t.name == "tidalviz-analysis")
+    before = _voluntary_switches(analysis)
+    for _ in range(40):
+        src.push()
+        time.sleep(0.003)
+    assert _voluntary_switches(analysis) - before <= 2
+    assert not out.frames
 
 
 def test_reports_silence_after_4_seconds_and_its_end(running):

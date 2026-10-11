@@ -94,8 +94,10 @@ class AudioPipeline:
         self._wake = threading.Event()  # pokes the supervisor
         self._running = False
         self._paused = False
+        self._unpause = threading.Event()  # wakes a paused analysis thread (resume or stop)
         self._format: SourceFormat | None = None
         self._ring = RingBuffer(1, 1)
+        self._resumed_at = (self._ring, 0)  # (ring, ring.written) when resume() was called
         self._analyzer: Analyzer | None = None
         self._configure(source.format)
 
@@ -127,6 +129,7 @@ class AudioPipeline:
         """Stop both threads and the active source. Blocks until they have finished."""
         self._running = False
         self._wake.set()
+        self._unpause.set()
         self._ring.wake()
         for t in self._threads:
             t.join(timeout=5.0)
@@ -142,8 +145,10 @@ class AudioPipeline:
         self._paused = True
 
     def resume(self) -> None:
+        ring = self._ring
+        self._resumed_at = (ring, ring.written)
         self._paused = False
-        self._ring.wake()
+        self._unpause.set()
 
     @property
     def paused(self) -> bool:
@@ -273,10 +278,14 @@ class AudioPipeline:
                 consumed = 0
             if not ring.wait_for(consumed + hop, timeout=0.1):
                 continue
-            written = ring.written
             if self._paused:
-                consumed = written
+                self._unpause.wait()
+                self._unpause.clear()
+                mark_ring, mark = self._resumed_at  # analyze only what arrived after resume()
+                ring = self._ring
+                consumed = mark if ring is mark_ring else 0  # a newer ring is all new
                 continue
+            written = ring.written
             hops = (written - consumed) // hop
             if hops > 1:
                 self._dropped += hops - 1  # stale: skip straight to the newest hop
