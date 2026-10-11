@@ -3,8 +3,9 @@
 // is soft); composite.frag then adds the cotton weave at full resolution.
 //
 // Dye is modelled as absorbance (Beer–Lambert): each palette color c becomes A = -log(c) in linear
-// light, concentrations add absorbance, and the white cotton shows through as exp(-A). So where two
-// dyes overlap they darken and mix like real dye, and thin dye reads as a faded tint.
+// light (u_abs, from lib/tiedye.js absorbanceOf), concentrations add absorbance, and the white
+// cotton shows through as exp(-A). So where two dyes overlap they darken and mix like real dye,
+// and thin dye reads as a faded tint.
 //
 // Band geometry (bandCoord) mirrors src/lib/tiedye.js — keep the constants in sync.
 precision highp float;
@@ -20,7 +21,7 @@ uniform float u_turns;     // rotation, turns
 uniform float u_time;      // slow clock for the fabric's breathing
 uniform int u_n;           // palette colors
 uniform float u_edges[9];  // cumulative band edges, 0..1
-uniform vec3 u_col[8];     // dye colors, sRGB
+uniform vec3 u_abs[8];     // dye absorbance per palette color
 uniform float u_warp[64];  // waveform around the circle, -1..1
 uniform float u_warpAmt;
 uniform float u_bleed;     // 0..1 edge softness
@@ -87,8 +88,7 @@ float ridged(vec2 p) {
 }
 
 // --- helpers -----------------------------------------------------------------------------------
-vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
-vec3 absorb(int i) { return -log(max(toLinear(u_col[i]), vec3(0.004))); }
+vec3 absorb(int i) { return u_abs[i]; }
 
 float warpAt(float turns) {
   float x = abs(fract(turns) * 2.0 - 1.0) * 63.0;

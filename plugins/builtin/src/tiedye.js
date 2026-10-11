@@ -16,6 +16,7 @@
  */
 import { createProgram, createTarget } from "./lib/gl.js";
 import {
+  absorbanceOf,
   createArmWarp,
   createBandWidths,
   createBlooms,
@@ -63,7 +64,9 @@ export default async function create(ctx) {
   const blooms = createBlooms(0x7ed1e);
   const intensity = createIntensity();
   const spinIn = { twist: 0, speed: 0, bassAtt: 0, reactivity: 0, reduceMotion: false };
+  const absorbance = new Float32Array(MAX_COLORS * 3);
   let nColors = paletteOf(ctx.params.palette, colors);
+  absorbanceOf(colors, absorbance);
   let clock = 0;
 
   return {
@@ -103,7 +106,7 @@ export default async function create(ctx) {
       gl.uniform1f(u.u_time, clock);
       gl.uniform1i(u.u_n, nColors);
       gl.uniform1fv(u.u_edges, edges);
-      gl.uniform3fv(u.u_col, colors);
+      gl.uniform3fv(u.u_abs, absorbance);
       gl.uniform1fv(u.u_warp, wave);
       gl.uniform1f(u.u_warpAmt, WARP_GAIN * Math.min(2, react));
       gl.uniform1f(u.u_bleed, Number(ctx.params.bleed));
@@ -128,7 +131,10 @@ export default async function create(ctx) {
     resize,
 
     params(changed) {
-      if ("palette" in changed) nColors = paletteOf(ctx.params.palette, colors);
+      if ("palette" in changed) {
+        nColors = paletteOf(ctx.params.palette, colors);
+        absorbanceOf(colors, absorbance);
+      }
     },
 
     dispose() {
