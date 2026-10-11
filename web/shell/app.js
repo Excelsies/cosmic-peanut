@@ -31,6 +31,8 @@ import { VISUAL_OPACITY_MIN } from "./validate.js";
 
 const IDLE_MS = 3000;
 const LOG_LINES = 200;
+// A plugin failing every other frame never reaches the SDK's 3-in-a-row fatal limit.
+const ERRORS_PER_S = 5;
 const AUTO_CYCLE_CHOICES = [0, 15, 30, 60, 120, 300];
 const QUALITY_LABELS = /** @type {const} */ ([
   ["auto", "Auto"],
@@ -271,8 +273,18 @@ export function createApp(deps) {
     connectionMessage = false;
   }
 
+  /** Outside dev mode the console is never shown: lines stay strings until it is. @type {string[]} */
+  const logLines = [];
+  let errorsAt = -Infinity;
+  let errorsShown = 0;
+  let errorsDropped = 0;
+
   /** @param {string} line */
   function log(line) {
+    if (!dev) {
+      if (logLines.push(line) > LOG_LINES) logLines.shift();
+      return;
+    }
     devlog.append(line + "\n");
     while (devlog.childNodes.length > LOG_LINES) devlog.firstChild?.remove();
     devlog.scrollTop = devlog.scrollHeight;
@@ -471,6 +483,21 @@ export function createApp(deps) {
     }
   }
 
+  function errorAllowed() {
+    const now = Date.now();
+    if (now - errorsAt >= 1000) {
+      if (errorsDropped > 0) log(`${errorsDropped} more plugin errors not shown`);
+      errorsAt = now;
+      errorsShown = errorsDropped = 0;
+    }
+    if (errorsShown < ERRORS_PER_S) {
+      errorsShown++;
+      return true;
+    }
+    errorsDropped++;
+    return false;
+  }
+
   // ---- plugin events -------------------------------------------------------------------------
   /** @param {PluginEvent} e */
   function onEvent(e) {
@@ -480,6 +507,7 @@ export function createApp(deps) {
         break;
       case "error":
       case "fatal": {
+        if (e.kind === "error" && !errorAllowed()) break;
         const { type: _t, ...err } = e.error;
         send({ type: "pluginError", key: e.key, ...err });
         const name = find(e.key)?.name ?? e.key;
@@ -671,6 +699,7 @@ export function createApp(deps) {
         sources = msg.sources;
         activeSource = msg.activeSource;
         dev = msg.dev;
+        if (dev) for (const line of logLines.splice(0)) log(line);
         refreshHz = msg.refreshHz;
         for (const v of visualizers) if (!values.has(v.key)) values.set(v.key, v.values);
         Object.assign(settings, msg.settings);

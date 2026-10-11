@@ -288,6 +288,35 @@ describe("app: plugin events", () => {
   });
 });
 
+describe("app: chatty plugins", () => {
+  it("outside dev mode log lines stay out of the DOM until dev mode turns on", () => {
+    const { app, root, host } = setup();
+    app.handle(hello({ dev: false }));
+    host.emit({ kind: "log", key: "builtin/bars", text: "early" });
+    const log = /** @type {HTMLElement} */ (root.querySelector("#devlog"));
+    expect(log.childNodes).toHaveLength(0);
+    app.handle(hello({ dev: true }));
+    expect(log.textContent).toBe("[builtin/bars] early\n");
+  });
+
+  it("non-fatal errors are reported at most 5 times a second; fatal ones always", () => {
+    const { app, root, host, sent } = setup();
+    app.handle(hello());
+    const errors = () => sent.filter((m) => m.type === "pluginError");
+    for (let i = 0; i < 20; i++) {
+      host.emit({ kind: "error", key: "builtin/bars", error: { type: "error", message: `e${i}`, fatal: false }, reload: false });
+    }
+    expect(errors()).toHaveLength(5);
+    expect(root.querySelector("#error")?.textContent).toContain("e4");
+    host.emit({ kind: "fatal", key: "builtin/bars", error: { type: "error", message: "dead", fatal: true }, wasActive: false });
+    expect(errors().at(-1)).toMatchObject({ message: "dead", fatal: true });
+    vi.advanceTimersByTime(1000);
+    host.emit({ kind: "error", key: "builtin/bars", error: { type: "error", message: "later", fatal: false }, reload: false });
+    expect(errors().at(-1)).toMatchObject({ message: "later" });
+    expect(root.querySelector("#devlog")?.textContent).toContain("15 more plugin errors not shown");
+  });
+});
+
 describe("app: host messages", () => {
   it("status updates the status line", () => {
     const { app, root } = setup();
