@@ -34,13 +34,9 @@ class Level:
     def process(self, ctx: AnalysisContext, out: AudioFrame) -> None:
         hop = ctx.mono[-ctx.hop :]
         ctx.hop_ms = float(np.dot(hop, hop)) / ctx.hop  # mean square, shared with AutoGain
-        peak = 0.0
-        for row in ctx.pcm:  # 1-D reduces: a strided 2-D reduce allocates a buffer
-            seg = row[-ctx.hop :]
-            peak = max(peak, float(np.maximum.reduce(seg)), -float(np.minimum.reduce(seg)))
         rms = math.sqrt(ctx.hop_ms)
         out.scalars[self._i_rms] = rms
-        out.scalars[self._i_peak] = peak
+        out.scalars[self._i_peak] = ctx.peak
         ctx.silent = out.silent = rms < SILENCE_RMS
 
 

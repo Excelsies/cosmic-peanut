@@ -46,6 +46,45 @@ def test_bands_release_to_exactly_zero_after_music_stops():
     assert np.all(f.bands == 0.0)  # not stuck at a float32 subnormal
 
 
+def test_exact_digital_silence_skips_the_fft_with_bit_identical_output(monkeypatch):
+    import tidalviz.analysis.analyzer as analyzer_mod
+    from tidalviz.analysis import Analyzer
+    from tidalviz.capture.ring import RingBuffer
+
+    sr = 48000
+
+    def run(channels: int, fft: int, block: int) -> tuple[np.ndarray, int]:
+        sig = np.zeros((10 * sr, channels), dtype=np.float32)
+        demo = SyntheticSource("demo", channels=channels).render(5 * sr)
+        sig[: 3 * sr] = demo[: 3 * sr]  # music, 2 s of silence, music, silence
+        sig[5 * sr : 7 * sr] = demo[3 * sr :]
+        sig[391 * 1024, 0] = 0.25  # a lone click starting a 1024-sample block, not its newest hop
+        an = Analyzer(float(sr), channels, AnalysisSettings(fft_size=fft))
+        ring = RingBuffer(16384, channels)
+        calls, rows = [0], []
+
+        def counting_rfft(x, out):
+            calls[0] += 1
+            rfft(x, out)
+
+        monkeypatch.setattr(analyzer_mod, "rfft", counting_rfft)
+        for i in range(0, len(sig), block):  # block > hop: the pipeline skipped a stale hop
+            ring.write(sig[i : i + block], 0.0)
+            f = an.process(ring, ring.written / sr)
+            planes = [f.scalars, f.bands, f.spectrum, f.waveform, [f.onset, f.silent]]
+            rows.append(np.concatenate(planes))
+        return np.array(rows), calls[0]
+
+    rfft = analyzer_mod.rfft
+    for channels, fft, block in [(2, 2048, 512), (1, 4096, 512), (2, 2048, 1024), (1, 4096, 1024)]:
+        with monkeypatch.context() as m:
+            m.setattr(analyzer_mod.AnalysisContext, "ZERO_WINDOWS_TO_SKIP", 10**9)
+            want, ffts = run(channels, fft, block)
+        got, fast_ffts = run(channels, fft, block)
+        assert ffts == len(want) and fast_ffts < 0.7 * ffts  # ~4.7 of 10 s is exact silence
+        np.testing.assert_array_equal(got, want)
+
+
 def test_level_reports_raw_rms_and_peak_of_the_newest_hop():
     f = last(SyntheticSource("sine1k"), 0.2)
     assert not f.silent

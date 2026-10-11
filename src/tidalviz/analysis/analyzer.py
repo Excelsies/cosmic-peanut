@@ -33,6 +33,10 @@ SUM_MAG, SUM_FREQ, SUM_BASS, SUM_MID, SUM_TREB = range(5)
 class AnalysisContext:
     """Per-hop inputs shared by all extractors. Arrays are reused every hop."""
 
+    # In exact digital silence the spectrum is skipped once this window and the two that
+    # magnitude rows 0 and 1 came from were all zero: mag, sums and sum_min are zeros already.
+    ZERO_WINDOWS_TO_SKIP = 3
+
     def __init__(self, sample_rate: float, channels: int, settings: AnalysisSettings) -> None:
         n = settings.fft_size
         self.settings = settings
@@ -72,6 +76,8 @@ class AnalysisContext:
         self.sums: F32 = self._sums[0]  # Σ mag · column, this hop (SUM_* indices)
         self.prev_sums: F32 = self._sums[1]  # the same for the previous hop
         self.sum_min = 0.0  # Σ min(mag, prev_mag)
+        self.peak = 0.0  # max |sample| of the newest hop over all channels
+        self._zero_windows = 0  # consecutive hops whose whole mono window was exactly zero
         self.gain = 1.0  # auto-gain factor for display features (set by AutoGain)
         self.silent = True  # set by Level
         # Tilted band levels on the 0–1 display scale, unclipped (floored at −10 dB below 0).
@@ -87,17 +93,30 @@ class AnalysisContext:
     def load(self, ring: RingBuffer, host_time: float) -> None:
         self.host_time = host_time
         self.pcm = pcm = ring.view(self.fft_size)
+        peak, zero = 0.0, True
+        for row in pcm:  # 1-D reduces: a strided 2-D reduce allocates a buffer
+            seg = row[-self.hop :]
+            hi, lo = float(np.maximum.reduce(seg)), float(np.minimum.reduce(seg))
+            peak = max(peak, hi, -lo)
+            zero = zero and hi == 0.0 and lo == 0.0  # NaN is not silence
+        self.peak = peak
         if self.channels == 1:
             self.mono = pcm[0]
         else:
             np.matmul(self._mix, pcm, out=self.mono)
-        np.multiply(self.mono, self.window, out=self._windowed32)
-        np.copyto(self.windowed, self._windowed32)
-        rfft(self.windowed, self.spec)
         mags, sums = self._mags, self._sums
         cur = self.index & 1
         self.mag, self.prev_mag = mags[cur], mags[cur ^ 1]
         self.sums, self.prev_sums = sums[cur], sums[cur ^ 1]
+        if zero:  # the newest hop is silent: is the rest of the FFT's input too?
+            older = self.mono[: -self.hop]
+            zero = np.maximum.reduce(older) == 0.0 and np.minimum.reduce(older) == 0.0
+        self._zero_windows = self._zero_windows + 1 if zero else 0
+        if self._zero_windows >= self.ZERO_WINDOWS_TO_SKIP:
+            return
+        np.multiply(self.mono, self.window, out=self._windowed32)
+        np.copyto(self.windowed, self._windowed32)
+        rfft(self.windowed, self.spec)
         np.abs(self.spec, out=self._mag64)
         np.copyto(self.mag, self._mag64)
         np.minimum(mags[0], mags[1], out=mags[2])
