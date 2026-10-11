@@ -71,6 +71,11 @@ describe("decodeInto validation and layout", () => {
     expect(() => decodeInto(createAudioFrame(), full.slice(0, full.byteLength - 4))).toThrow(/truncated/);
     expect(() => peekFlags(new ArrayBuffer(8))).toThrow(FrameError);
   });
+  it("skips the header check for a buffer already validated with peekFlags", () => {
+    const buf = encodeFrame({ magic: 0x12345678, fill: (p) => (p === "scalars" ? 1 : 0) });
+    expect(decodeInto(createAudioFrame(), buf, true).rms).toBe(1);
+  });
+
   it("uses the header counts, not constants (extra scalars appended)", () => {
     const buf = encodeFrame({
       bands: 8, spectrum: 16, waveform: 4, scalars: 20, stereo: true,

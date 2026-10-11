@@ -211,7 +211,7 @@ export function createRuntime(deps) {
     if (lastTs < 0) perf.start(ts);
     let onsetIndex = -1;
     if (pending) {
-      decodeInto(audio, pending);
+      decodeInto(audio, pending, true); // peekFlags validated it on arrival
       pending = null;
       if (latchedOnset >= 0) {
         audio.onset = true;
