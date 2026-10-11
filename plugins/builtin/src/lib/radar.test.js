@@ -18,7 +18,7 @@ import {
   F_MIN,
   radiusOfFreq,
   freqAtRadius,
-  spectrumColumn,
+  createSpectrumColumn,
   createLevel,
   wedgeMix,
 } from "./radar.js";
@@ -176,7 +176,7 @@ describe("radiusOfFreq", () => {
   });
 });
 
-describe("spectrumColumn", () => {
+describe("createSpectrumColumn", () => {
   const SR = 48000;
   const N = 512;
 
@@ -190,7 +190,7 @@ describe("spectrumColumn", () => {
         const i = Math.round(hz / binHz);
         spec.fill(0);
         spec[i] = 0.8;
-        spectrumColumn(spec, SR, 16000, out);
+        createSpectrumColumn()(spec, SR, 16000, out);
         const k = Math.floor(radiusOfFreq(i * binHz, 16000) * N);
         expect(Math.max(out[k - 1], out[k], out[k + 1]), `${len} ${hz} Hz`).toBeCloseTo(0.8, 6);
         const peak = out.indexOf(Math.max(...out));
@@ -208,15 +208,45 @@ describe("spectrumColumn", () => {
     const spec = new Float32Array(1024);
     spec[3] = 0.2;
     spec[4] = 0.6;
-    const out = spectrumColumn(spec, SR, 16000, new Float32Array(N));
+    const out = createSpectrumColumn()(spec, SR, 16000, new Float32Array(N));
     const binHz = SR / 2048;
     const k = Math.floor(radiusOfFreq(3.5 * binHz, 16000) * N);
     expect(out[k]).toBeGreaterThan(0.3);
     expect(out[k]).toBeLessThan(0.5);
   });
 
+  it("matches the uncached resampling exactly as the rate, top frequency and spectrum length change", () => {
+    /** The resampling with the bin edges computed in place, as before they were cached. */
+    const reference = (/** @type {Float32Array} */ s, /** @type {number} */ sr, /** @type {number} */ maxHz) => {
+      const out = new Float32Array(N);
+      const len = s.length;
+      const at = (/** @type {number} */ x) => {
+        if (x < 0 || x > len - 1) return 0;
+        const i = Math.min(len - 2, Math.floor(x));
+        return s[i] + (s[i + 1] - s[i]) * (x - i);
+      };
+      for (let k = 0; k < N; k++) {
+        const r0 = Math.max(R_INNER, k / N);
+        const r1 = Math.min(R_OUTER, (k + 1) / N);
+        if (r1 <= r0 || len < 2) continue;
+        const b0 = freqAtRadius(r0, maxHz) * ((2 * len) / sr);
+        const b1 = freqAtRadius(r1, maxHz) * ((2 * len) / sr);
+        let v = Math.max(at(b0), at(b1));
+        for (let i = Math.max(0, Math.ceil(b0)); i <= Math.min(len - 1, Math.floor(b1)); i++) v = Math.max(v, s[i]);
+        out[k] = v;
+      }
+      return out;
+    };
+    const column = createSpectrumColumn();
+    const out = new Float32Array(N);
+    for (const [len, sr, maxHz] of [[1024, 48000, 16000], [1024, 48000, 16000], [1024, 44100, 16000], [1024, 44100, 4000], [512, 44100, 4000], [1, 44100, 4000], [2048, 96000, 8000]]) {
+      const spec = Float32Array.from({ length: len }, (_, i) => Math.abs(Math.sin(i * 0.37 + len)) * 0.5);
+      expect(column(spec, sr, maxHz, out), `${len} ${sr} ${maxHz}`).toEqual(reference(spec, sr, maxHz));
+    }
+  });
+
   it("is black inside the lowest frequency and past maxFreq", () => {
-    const out = spectrumColumn(new Float32Array(1024).fill(0.5), SR, 4000, new Float32Array(N).fill(9));
+    const out = createSpectrumColumn()(new Float32Array(1024).fill(0.5), SR, 4000, new Float32Array(N).fill(9));
     for (let k = 0; k < N; k++) {
       const r = (k + 1) / N;
       const r0 = k / N;
@@ -302,7 +332,7 @@ describe("no randomness", () => {
   it("identical audio paints identical columns", () => {
     const spec = Float32Array.from({ length: 1024 }, (_, i) => Math.abs(Math.sin(i * 0.37)) * 0.5);
     const run = () => {
-      const col = spectrumColumn(spec, 48000, 16000, new Float32Array(512));
+      const col = createSpectrumColumn()(spec, 48000, 16000, new Float32Array(512));
       const lvl = createLevel();
       const out = new Float32Array(512);
       for (let f = 0; f < 30; f++) lvl.step(col, 1 / 60, -60, 1, out);

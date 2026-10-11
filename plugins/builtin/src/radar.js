@@ -20,10 +20,10 @@ import { createProgram, createTarget } from "./lib/gl.js";
 import {
   createDecay,
   createLevel,
+  createSpectrumColumn,
   createSweep,
   fitScope,
   phosphorPalette,
-  spectrumColumn,
   sweptWedge,
 } from "./lib/radar.js";
 
@@ -63,6 +63,7 @@ export default async function create(ctx) {
   const raw = new Float32Array(N_RAD);
   const last = new Float32Array(N_RAD);
   const column = new Float32Array(N_RAD);
+  const spectrumColumn = createSpectrumColumn();
 
   const sweep = createSweep();
   const decay = createDecay();
