@@ -10,8 +10,6 @@ import {
   screenRadius,
   SHAPES,
   SKULL_RADIUS,
-  TEETH_DOWN_BOUND,
-  TEETH_UP_BOUND,
   TOOTH,
   TOOTH_ROUND,
   TOOTH_SIDE,
@@ -78,23 +76,11 @@ describe("skull bounding sphere", () => {
   });
 });
 
-describe("map() skip bounds (skull.frag)", () => {
+describe("map()'s jaw bound (skull.frag)", () => {
   // map() runs within SKULL_RADIUS plus the normal and AO offsets (0.18); the jaw frame turns that
   // about the hinge, which is 0.43 from the origin, by up to JAW_LIMIT.
   const REACH = SKULL_RADIUS + 0.19;
   const JAW_REACH = REACH + 2 * 0.43 * Math.sin(JAW_LIMIT / 2);
-
-  it("each row of teeth is no nearer than its bounding sphere", () => {
-    // Exact by construction (a rounded box is no nearer than its circumscribed sphere); sampled too.
-    for (const [row, bound] of /** @type {const} */ ([["TEETH_UP", TEETH_UP_BOUND], ["TEETH_DOWN", TEETH_DOWN_BOUND]])) {
-      const { c, arc } = /** @type {import("./skull-bounds.js").Teeth} */ (SHAPES[row]);
-      let slack = Infinity;
-      for (const p of ball(JAW_REACH, 0.04)) {
-        slack = Math.min(slack, sdTeeth(p, c, arc) - (len(p[0] - c[0], p[1] - c[1], p[2] - c[2]) - bound));
-      }
-      expect(slack, row).toBeGreaterThan(0);
-    }
-  });
 
   it("the jaw's distance function is never below its bounding sphere, in the jaw's frame", () => {
     // Below this floor sdJaw can't go: each part is >= -(its largest radius), each smin dips at
@@ -121,10 +107,8 @@ describe("map() skip bounds (skull.frag)", () => {
     expect(slack).toBeGreaterThan(0.05);
   });
 
-  it("are injected into the shader", () => {
+  it("is injected into the shader", () => {
     const src = glslDefines();
-    expect(src).toContain(`#define TEETH_UP_BOUND ${TEETH_UP_BOUND}`);
-    expect(src).toContain(`#define TEETH_DOWN_BOUND ${TEETH_DOWN_BOUND}`);
     expect(src).toContain(`#define JAW_BOUND_R ${JAW_BOUND_R}`);
     expect(src).toMatch(/#define JAW_BOUND_C vec3\(/);
   });

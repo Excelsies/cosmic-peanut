@@ -48,13 +48,6 @@ float sdTeeth(vec3 p, vec3 c, float arc) {
   return sdRoundBox(q, TOOTH * vec3(1.0, s, 1.0), TOOTH_ROUND);
 }
 
-// smin(d, teeth, 0.015), skipping the teeth where their bounding sphere (lib/skull-bounds.js) is
-// beyond the smin's reach: there it returns d anyway.
-float withTeeth(float d, vec3 p, vec3 c, float arc, float bound) {
-  if (length(p - c) - bound >= d + 0.015) return d;
-  return smin(d, sdTeeth(p, c, arc), 0.015);
-}
-
 // Skull without the jaw. m = mirrored point (x ≥ 0).
 float sdCranium(vec3 p) {
   vec3 m = vec3(abs(p.x), p.yz);
@@ -70,7 +63,8 @@ float sdCranium(vec3 p) {
   d = smax(d, -sdEllipsoid(m - SOCKET_C, SOCKET_R), 0.05);
   float nose = min(sdEllipsoid(m - NOSE_LOBE_C, NOSE_LOBE_R), sdEllipsoid(p - NOSE_TIP_C, NOSE_TIP_R));
   d = smax(d, -nose, 0.03);
-  return withTeeth(d, p, TEETH_UP_C, TEETH_UP_ARC, TEETH_UP_BOUND);
+  d = smin(d, sdTeeth(p, TEETH_UP_C, TEETH_UP_ARC), 0.015);
+  return d;
 }
 
 vec3 toJaw(vec3 p) {
@@ -87,7 +81,8 @@ float sdJaw(vec3 j) {
   float d = sdEllipsoid(j - CHIN_C, CHIN_R);
   d = smin(d, sdCapsule(m, JAW_BODY_A, JAW_BODY_B, JAW_BODY_R), 0.1);
   d = smin(d, sdCapsule(m, RAMUS_A, RAMUS_B, RAMUS_R), 0.08);
-  return withTeeth(d, j, TEETH_DOWN_C, TEETH_DOWN_ARC, TEETH_DOWN_BOUND);
+  d = smin(d, sdTeeth(j, TEETH_DOWN_C, TEETH_DOWN_ARC), 0.015);
+  return d;
 }
 
 float map(vec3 p) {
