@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import statistics
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -178,5 +179,27 @@ def test_save_to_callback_latency(tmp_path: Path, rec: Recorder) -> None:
         print(f"\ndev-folder save->callback latency: p50 {p50:.0f} ms, max {worst:.0f} ms")
         assert p50 < 150
         assert worst < 250
+    finally:
+        w.stop()
+
+
+def _switches(native_id: int) -> int:
+    status = Path(f"/proc/self/task/{native_id}/status").read_text().splitlines()
+    return sum(int(line.split(":")[1]) for line in status if "ctxt_switches" in line)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+def test_idle_watcher_wakes_at_most_25_times_a_second(tmp_path: Path, rec: Recorder) -> None:
+    a = write_plugin(tmp_path / "a", "pulse").resolve()
+    w = DevFolderWatcher(rec.on_change)
+    w.add("dev-a", a)
+    w.start()
+    try:
+        settle(rec, lambda: (a / "src/pulse.js").write_text("// warm"))
+        (thread,) = [t for t in threading.enumerate() if t.name == "tidalviz-devwatch"]
+        assert thread.native_id is not None
+        before = _switches(thread.native_id)
+        time.sleep(1.0)
+        assert _switches(thread.native_id) - before <= 25
     finally:
         w.stop()

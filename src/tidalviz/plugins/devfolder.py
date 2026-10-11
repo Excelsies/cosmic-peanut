@@ -34,7 +34,7 @@ class DevFolderWatcher:
         revalidate: Revalidate | None = None,
         on_manifest_errors: OnManifestErrors | None = None,
         debounce_ms: int = 50,
-        step_ms: int = 10,
+        step_ms: int = 50,  # watchfiles default; each step is a wakeup while idle
     ) -> None:
         self._on_change = on_change
         self._revalidate = revalidate
