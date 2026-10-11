@@ -1,6 +1,6 @@
 // @ts-check
-import { describe, expect, it } from "vitest";
-import { fakeContext } from "./fake-2d.test-helper.js";
+import { describe, expect, it, vi } from "vitest";
+import { FakePath2D, fakeContext } from "./fake-2d.test-helper.js";
 import {
   advanceScroll,
   bandAt,
@@ -13,8 +13,11 @@ import {
   ridgeLayout,
   ringPush,
   ringRow,
+  rowPaths,
   stepGain,
 } from "./ridges.js";
+
+vi.stubGlobal("Path2D", FakePath2D);
 
 const ramp = Float32Array.from({ length: 64 }, (_, i) => i / 63);
 
@@ -297,16 +300,28 @@ describe("drawRidges", () => {
     }
     return r;
   }
+  /**
+   * Draw ring4 the way Pulsar does, with each row's paths built from `idx`.
+   * @param {CanvasRenderingContext2D} ctx @param {Int16Array} idx @param {number} frac @param {string} color
+   * @param {number} lineWidth
+   */
+  function draw(ctx, idx, frac, color, lineWidth) {
+    const r = ring4();
+    const paths = Array.from({ length: r.lines }, (_, k) => rowPaths(r.data, k * P, idx, P, lay, lineWidth));
+    drawRidges(ctx, r, paths, lay, frac, color, lineWidth, 400);
+  }
   /** Split the log into per-draw-call segments: the path ops before each fill/stroke. */
   function draws(/** @type {ReturnType<typeof fakeContext>["log"]} */ log) {
     const out = [];
     /** @type {typeof log} */
     let path = [];
+    /** @type {unknown} */
     let pathId = 0;
+    let n = 0;
     for (const e of log) {
       if (e.op === "begin") {
         path = [];
-        pathId++;
+        pathId = e.path ?? ++n;
       } else if (e.op === "fill" || e.op === "stroke") out.push({ ...e, path: path.slice(), pathId });
       else path.push(e);
     }
@@ -315,7 +330,7 @@ describe("drawRidges", () => {
 
   it("erases under each line (destination-out) and then strokes it (source-over)", () => {
     const { log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), ALL, lay, 0, "#ffffff", 3, 400);
+    draw(ctx, ALL, 0, "#ffffff", 3);
     const d = draws(log);
     expect(d.map((e) => `${e.op}:${e.gco}`)).toEqual(
       Array(4).fill(["fill:destination-out", "stroke:source-over"]).flat(),
@@ -328,7 +343,7 @@ describe("drawRidges", () => {
 
   it("draws back to front: oldest (top) line first, newest (bottom) last", () => {
     const { log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), ALL, lay, 0, "#fff", 1, 400);
+    draw(ctx, ALL, 0, "#fff", 1);
     const strokes = draws(log).filter((e) => e.op === "stroke");
     // Baselines 50, 150, 250, 350 minus value × amp (oldest row holds 0.1).
     expect(strokes.map((s) => s.path[0].y)).toEqual([50 - 20, 150 - 40, 250 - 60, 350 - 80].map((v) => expect.closeTo(v, 4)));
@@ -336,7 +351,7 @@ describe("drawRidges", () => {
 
   it("draws only the points listed in `idx`, at their own x", () => {
     const { log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), Int16Array.from([0, 2, 4]), lay, 0, "#fff", 1, 400);
+    draw(ctx, Int16Array.from([0, 2, 4]), 0, "#fff", 1);
     const d = draws(log);
     const front = d[d.length - 1];
     expect(front.path.map((p) => p.x)).toEqual([100, 300, 500]);
@@ -345,7 +360,7 @@ describe("drawRidges", () => {
 
   it("clips to the plot's width for the whole draw", () => {
     const { log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), ALL, lay, 0, "#fff", 1, 400);
+    draw(ctx, ALL, 0, "#fff", 1);
     const ops = log.map((e) => e.op);
     expect(ops.slice(0, 4)).toEqual(["save", "begin", "rect", "clip"]);
     expect(log[2]).toMatchObject({ x: 100, w: 400 });
@@ -354,7 +369,7 @@ describe("drawRidges", () => {
 
   it("front two lines stroke only their curve; back lines stroke the path they erased with, whose closing edges stay hidden", () => {
     const { log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), ALL, lay, 0, "#fff", 2, 400);
+    draw(ctx, ALL, 0, "#fff", 2);
     const d = draws(log);
     const strokes = d.filter((e) => e.op === "stroke");
     for (const s of strokes.slice(-2)) {
@@ -388,7 +403,7 @@ describe("drawRidges", () => {
 
   it("every erase reaches below its own baseline by more than a line spacing", () => {
     const { log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), ALL, lay, 0, "#fff", 2, 400);
+    draw(ctx, ALL, 0, "#fff", 2);
     const fills = draws(log).filter((e) => e.op === "fill");
     fills.forEach((f, k) => {
       const lowest = Math.max(...f.path.filter((p) => p.y !== undefined).map((p) => /** @type {number} */ (p.y)));
@@ -398,7 +413,7 @@ describe("drawRidges", () => {
 
   it("offsets every line up by the scroll fraction and fades the oldest out, the newest in", () => {
     const { g, log, ctx } = fakeContext();
-    drawRidges(ctx, ring4(), ALL, lay, 0.25, "#fff", 1, 400);
+    draw(ctx, ALL, 0.25, "#fff", 1);
     const strokes = draws(log).filter((e) => e.op === "stroke");
     expect(strokes[3].path[0].y).toBeCloseTo(350 - 25 - 80);
     expect(strokes.map((s) => s.alpha)).toEqual([0.75, 1, 1, 0.25]);

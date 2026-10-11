@@ -1,7 +1,9 @@
 // @ts-check
-import { describe, expect, it } from "vitest";
-import { fakeContext } from "./lib/fake-2d.test-helper.js";
+import { describe, expect, it, vi } from "vitest";
+import { FakePath2D, fakeContext } from "./lib/fake-2d.test-helper.js";
 import create from "./pulsar.js";
+
+vi.stubGlobal("Path2D", FakePath2D);
 
 const DEFAULTS = { lines: "80", speed: 10, height: 1, color: "#ffffff", lineWidth: 1.5 };
 
@@ -98,6 +100,16 @@ describe("pulsar", () => {
     expect(peaked(log)).toBeGreaterThanOrEqual(9);
     expect(strokes.every((e) => e.style === "#ff8800" && e.width === 4)).toBe(true);
     expect(Math.max(...rises(log))).toBeGreaterThan(before * 1.5);
+  });
+
+  it("builds a ridge's paths when it arrives or the layout changes, not per frame", () => {
+    const s = setup();
+    run(s, 1);
+    const before = FakePath2D.created;
+    run(s, 60);
+    expect(FakePath2D.created - before).toBe(2 * 10);
+    s.viz.resize?.(s.ctx.size);
+    expect(FakePath2D.created - before).toBe(2 * 10 + 2 * 80);
   });
 
   it("falls back to white for a malformed color", () => {
