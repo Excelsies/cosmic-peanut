@@ -275,9 +275,8 @@ export function createApp(deps) {
 
   /** Outside dev mode the console is never shown: lines stay strings until it is. @type {string[]} */
   const logLines = [];
-  let errorsAt = -Infinity;
-  let errorsShown = 0;
-  let errorsDropped = 0;
+  /** Per plugin, so a chatty one can't hide another's errors. @type {Map<string, { at: number, shown: number, dropped: number }>} */
+  const errorBudgets = new Map();
 
   /** @param {string} line */
   function log(line) {
@@ -491,18 +490,21 @@ export function createApp(deps) {
     }
   }
 
-  function errorAllowed() {
+  /** @param {string} key */
+  function errorAllowed(key) {
+    let b = errorBudgets.get(key);
+    if (!b) errorBudgets.set(key, (b = { at: -Infinity, shown: 0, dropped: 0 }));
     const now = Date.now();
-    if (now - errorsAt >= 1000) {
-      if (errorsDropped > 0) log(`${errorsDropped} more plugin errors not shown`);
-      errorsAt = now;
-      errorsShown = errorsDropped = 0;
+    if (now - b.at >= 1000) {
+      if (b.dropped > 0) log(`${b.dropped} more errors from ${key} not shown`);
+      b.at = now;
+      b.shown = b.dropped = 0;
     }
-    if (errorsShown < ERRORS_PER_S) {
-      errorsShown++;
+    if (b.shown < ERRORS_PER_S) {
+      b.shown++;
       return true;
     }
-    errorsDropped++;
+    b.dropped++;
     return false;
   }
 
@@ -515,7 +517,7 @@ export function createApp(deps) {
         break;
       case "error":
       case "fatal": {
-        if (e.kind === "error" && !errorAllowed()) break;
+        if (e.kind === "error" && !errorAllowed(e.key)) break;
         const { type: _t, ...err } = e.error;
         send({ type: "pluginError", key: e.key, ...err });
         const name = find(e.key)?.name ?? e.key;
