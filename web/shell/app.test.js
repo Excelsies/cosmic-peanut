@@ -333,7 +333,17 @@ describe("app: chatty plugins", () => {
     vi.advanceTimersByTime(1000);
     host.emit({ kind: "error", key: "builtin/bars", error: { type: "error", message: "later", fatal: false }, reload: false });
     expect(errors().at(-1)).toMatchObject({ message: "later" });
-    expect(root.querySelector("#devlog")?.textContent).toContain("15 more plugin errors not shown");
+    expect(root.querySelector("#devlog")?.textContent).toContain("15 more errors from builtin/bars not shown");
+  });
+
+  it("a chatty plugin's errors don't use up another plugin's allowance", () => {
+    const { app, host, sent } = setup();
+    app.handle(hello());
+    for (let i = 0; i < 20; i++) {
+      host.emit({ kind: "error", key: "builtin/bars", error: { type: "error", message: `e${i}`, fatal: false }, reload: false });
+    }
+    host.emit({ kind: "error", key: "builtin/orbit", error: { type: "error", message: "orbit", fatal: false }, reload: false });
+    expect(sent.filter((m) => m.type === "pluginError").at(-1)).toMatchObject({ key: "builtin/orbit", message: "orbit" });
   });
 });
 

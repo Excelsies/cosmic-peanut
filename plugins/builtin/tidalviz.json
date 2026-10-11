@@ -71,6 +71,7 @@
       "author": "Tidalviz",
       "entry": "src/stargate.js",
       "renderer": "webgl2",
+      "depth": false,
       "thumbnail": "thumbs/stargate.jpg",
       "params": [
         { "id": "speed", "type": "number", "label": "Speed", "min": 0, "max": 3, "step": 0.05, "default": 1 },
@@ -131,6 +132,7 @@
       "author": "Tidalviz",
       "entry": "src/radar.js",
       "renderer": "webgl2",
+      "depth": false,
       "thumbnail": "thumbs/radar.jpg",
       "params": [
         { "id": "sync", "type": "select", "label": "Tempo lock", "options": ["off", "beat", "bar"], "default": "bar" },
@@ -211,6 +213,7 @@
       "author": "Tidalviz",
       "entry": "src/darksun.js",
       "renderer": "webgl2",
+      "depth": false,
       "thumbnail": "thumbs/darksun.jpg",
       "params": [
         { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
@@ -229,6 +232,7 @@
       "author": "Tidalviz",
       "entry": "src/eclipse.js",
       "renderer": "webgl2",
+      "depth": false,
       "thumbnail": "thumbs/eclipse.jpg",
       "params": [
         { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
@@ -247,6 +251,7 @@
       "author": "Tidalviz",
       "entry": "src/marbling.js",
       "renderer": "webgl2",
+      "depth": false,
       "thumbnail": "thumbs/marbling.jpg",
       "params": [
         { "id": "palette", "type": "select", "label": "Palette", "options": ["beast", "indigo", "emerald", "gold"], "default": "beast" },
@@ -285,6 +290,7 @@
       "author": "Tidalviz",
       "entry": "src/tetraballs.js",
       "renderer": "webgl2",
+      "depth": false,
       "thumbnail": "thumbs/tetraballs.jpg",
       "params": [
         { "id": "material", "type": "select", "label": "Material", "options": ["auto", "chrome", "soap", "jade", "brushed", "velvet", "glass", "water", "fire", "smoke"], "default": "chrome" },
