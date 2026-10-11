@@ -84,17 +84,20 @@ export default async function create(ctx) {
   const softFbo = gl.createFramebuffer();
   let softW = 0;
   let softH = 0;
-  let msaaOn = false;
+  let softPath = "";
   function resizeSoft() {
     const w = Math.max(1, Math.min(ctx.size.width, Math.round(ctx.size.cssWidth)));
     const h = Math.max(1, Math.min(ctx.size.height, Math.round(ctx.size.cssHeight)));
-    const wantMsaa = renderPath(ctx.params.lines, ctx.params.antialias) === "msaa";
-    if (w === softW && h === softH && wantMsaa === msaaOn) return;
+    const path = renderPath(ctx.params.lines, ctx.params.antialias);
+    if (w === softW && h === softH && path === softPath) return;
     softW = w;
     softH = h;
-    msaaOn = wantMsaa;
+    softPath = path;
+    const msaaOn = path === "msaa";
+    const texOn = path !== "canvas";
+    // Buffers a path doesn't use keep only a 1×1 placeholder, so their memory is freed.
     gl.bindTexture(gl.TEXTURE_2D, softTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, texOn ? w : 1, texOn ? h : 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -102,7 +105,6 @@ export default async function create(ctx) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, softFbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, softTex, 0);
     gl.bindRenderbuffer(gl.RENDERBUFFER, msaaRb);
-    // Antialias off (or fine lines): keep only a 1×1 placeholder so the MSAA memory is freed.
     gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.RGBA8, msaaOn ? w : 1, msaaOn ? h : 1);
     gl.bindFramebuffer(gl.FRAMEBUFFER, msaaFbo);
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, msaaRb);
