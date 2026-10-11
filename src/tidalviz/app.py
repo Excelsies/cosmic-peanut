@@ -8,12 +8,17 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tidalviz.paths import default_root
+
+# Before numpy loads: OpenBLAS would start one idle worker per core, and every BLAS call here is
+# far below its threading threshold.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 if TYPE_CHECKING:
     from tidalviz.host import Host
