@@ -121,6 +121,35 @@ describe("boot", () => {
     }
   });
 
+  it("ctx.reduceMotion follows the media query without re-querying it per read", async () => {
+    let reads = 0;
+    /** @type {((e: { matches: boolean }) => void) | undefined} */
+    let onChange;
+    vi.stubGlobal("matchMedia", (/** @type {string} */ query) => ({
+      get matches() {
+        reads++;
+        return query.includes("reduced-motion");
+      },
+      addEventListener: (/** @type {string} */ _t, /** @type {any} */ fn) => {
+        if (query.includes("reduced-motion")) onChange = fn;
+      },
+    }));
+    try {
+      const e = env({ frame: vi.fn() });
+      const booted = boot(OPTS, { importModule: e.importModule });
+      sendInit(INIT, [fakePort()]);
+      await booted;
+      const ctx = /** @type {any} */ (e.create.mock.calls[0])[0];
+      const before = reads;
+      for (let i = 0; i < 10; i++) expect(ctx.reduceMotion).toBe(true);
+      expect(reads).toBe(before);
+      onChange?.({ matches: false });
+      expect(ctx.reduceMotion).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("passes the manifest's depth opt-out to the webgl2 context", async () => {
     /** @type {any[]} */
     const calls = [];

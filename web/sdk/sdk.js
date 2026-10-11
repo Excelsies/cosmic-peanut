@@ -79,8 +79,11 @@ async function start(opts, init, port, load) {
     fetch: (url) => fetch(url),
     createImageBitmap: (b) => createImageBitmap(b),
     reduceMotion: (() => {
+      // Plugins read it every frame: cache it, updated on change.
       const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-      return () => mq?.matches ?? false;
+      let reduce = mq?.matches ?? false;
+      mq?.addEventListener?.("change", (e) => (reduce = e.matches));
+      return () => reduce;
     })(),
   });
 
