@@ -33,6 +33,58 @@ def test_silence_is_flagged_and_reads_zero():
     assert np.all(f.bands == 0.0) and np.all(f.spectrum == 0.0)
 
 
+def test_bands_release_to_exactly_zero_after_music_stops():
+    src = SyntheticSource("demo")
+    orig, hops = src.render, [0]
+
+    def render(n: int) -> np.ndarray:
+        hops[0] += 1
+        return orig(n) if hops[0] <= 300 else np.zeros((n, 2), dtype=np.float32)
+
+    src.render = render  # type: ignore[method-assign]
+    f = last(src, 300 / 93.75 + 7.0)  # release from 1.0 passes 1e-9 after ~6.2 s
+    assert np.all(f.bands == 0.0)  # not stuck at a float32 subnormal
+
+
+def test_exact_digital_silence_skips_the_fft_with_bit_identical_output(monkeypatch):
+    import tidalviz.analysis.analyzer as analyzer_mod
+    from tidalviz.analysis import Analyzer
+    from tidalviz.capture.ring import RingBuffer
+
+    sr = 48000
+
+    def run(channels: int, fft: int, block: int) -> tuple[np.ndarray, int]:
+        sig = np.zeros((10 * sr, channels), dtype=np.float32)
+        demo = SyntheticSource("demo", channels=channels).render(5 * sr)
+        sig[: 3 * sr] = demo[: 3 * sr]  # music, 2 s of silence, music, silence
+        sig[5 * sr : 7 * sr] = demo[3 * sr :]
+        sig[391 * 1024, 0] = 0.25  # a lone click starting a 1024-sample block, not its newest hop
+        an = Analyzer(float(sr), channels, AnalysisSettings(fft_size=fft))
+        ring = RingBuffer(16384, channels)
+        calls, rows = [0], []
+
+        def counting_rfft(x, out):
+            calls[0] += 1
+            rfft(x, out)
+
+        monkeypatch.setattr(analyzer_mod, "rfft", counting_rfft)
+        for i in range(0, len(sig), block):  # block > hop: the pipeline skipped a stale hop
+            ring.write(sig[i : i + block], 0.0)
+            f = an.process(ring, ring.written / sr)
+            planes = [f.scalars, f.bands, f.spectrum, f.waveform, [f.onset, f.silent]]
+            rows.append(np.concatenate(planes))
+        return np.array(rows), calls[0]
+
+    rfft = analyzer_mod.rfft
+    for channels, fft, block in [(2, 2048, 512), (1, 4096, 512), (2, 2048, 1024), (1, 4096, 1024)]:
+        with monkeypatch.context() as m:
+            m.setattr(analyzer_mod.AnalysisContext, "ZERO_WINDOWS_TO_SKIP", 10**9)
+            want, ffts = run(channels, fft, block)
+        got, fast_ffts = run(channels, fft, block)
+        assert ffts == len(want) and fast_ffts < 0.7 * ffts  # ~4.7 of 10 s is exact silence
+        np.testing.assert_array_equal(got, want)
+
+
 def test_level_reports_raw_rms_and_peak_of_the_newest_hop():
     f = last(SyntheticSource("sine1k"), 0.2)
     assert not f.silent
@@ -235,15 +287,20 @@ def test_hot_path_allocates_nothing_per_frame_beyond_small_scalars():
     for b in blocks[:300]:  # warm up past tempo lock (its one-time comb allocates)
         ring.write(b, 0.0)
         an.process(ring, ring.written / 48000.0)
+    hot = iter(blocks[300:])
     tracemalloc.start()
+    for _ in range(16):  # traced warm-up: the views kept between hops become traced objects
+        ring.write(next(hot), 0.0)
+        an.process(ring, ring.written / 48000.0)
     base, _ = tracemalloc.get_traced_memory()
-    for b in blocks[300:]:
+    tracemalloc.reset_peak()
+    for b in hot:
         ring.write(b, 0.0)
         an.process(ring, ring.written / 48000.0)
     cur, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     assert cur - base < 4096  # nothing retained
-    assert peak - base < 16384  # no per-frame arrays (a 2048-sample float32 array is 8 KB)
+    assert peak - base < 2048  # no per-frame arrays or ufunc buffers (one float32 hop is 2 KB)
 
 
 def test_bass_mid_treb_are_near_one_from_the_first_seconds():
