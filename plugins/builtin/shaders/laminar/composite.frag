@@ -51,8 +51,9 @@ vec4 cubic(vec2 uv) {
   vec2 g1 = w2 + w3;
   vec2 h0 = (i - 0.5 + w1 / g0) / u_simSize;
   vec2 h1 = (i + 1.5 + w3 / g1) / u_simSize;
-  return g0.y * (g0.x * texture(u_scal, vec2(h0.x, h0.y)) + g1.x * texture(u_scal, vec2(h1.x, h0.y))) +
-         g1.y * (g0.x * texture(u_scal, vec2(h0.x, h1.y)) + g1.x * texture(u_scal, vec2(h1.x, h1.y)));
+  // Level 0 explicitly (u_scal has no mips): also valid in the ball's branch in main().
+  return g0.y * (g0.x * textureLod(u_scal, vec2(h0.x, h0.y), 0.0) + g1.x * textureLod(u_scal, vec2(h1.x, h0.y), 0.0)) +
+         g1.y * (g0.x * textureLod(u_scal, vec2(h0.x, h1.y), 0.0) + g1.x * textureLod(u_scal, vec2(h1.x, h1.y), 0.0));
 }
 
 // Screen (heights, y up) → sim frame (heights).
@@ -124,35 +125,37 @@ void main() {
   // ball's lower half mirrors the stream and its upper half the sky, like a real chrome ball.
   const vec3 EYE = vec3(0.0, -0.5, -0.866);
   vec3 Rr = r < 1.0 ? reflect(EYE, N) : vec3(0.0, 0.0, -1.0);
-  // Where the reflected ray meets the liquid (always computed, so the derivatives below are
-  // defined for every pixel; outside the ball it's the pixel itself).
+  // Where the reflected ray meets the liquid; outside the ball it's the pixel itself (fr = f).
+  // Its derivatives are taken outside the branch, so every pixel of a quad has them.
   float hgt = (0.35 + z) * u_ball.z;
   // (Distances squeezed by half: the mirrored lines stay broad instead of crowding into moiré.)
   float t = 0.5 * hgt / max(-Rr.z, 0.12);
-  vec2 hit = s + Rr.xy * t;
-  vec3 fr = field(hit);
+  vec3 fr = f;
+  if (r < 1.0) fr = field(s + Rr.xy * t);
   vec2 gr = vec2(dFdx(fr.x), dFdy(fr.x));
-  float tr;
-  vec4 cr = surface(fr, gr, tr);
-  vec3 floorCol = cr.rgb + u_gap * (1.0 - cr.a);
-  // Studio sky: a bright, soft gradient (pale lilac-white overhead, darker towards the horizon),
-  // a big window up-left and a small bright key.
-  float up = clamp(Rr.z, 0.0, 1.0);
-  vec3 sky = mix(mix(u_shadow, u_line, 0.45), mix(u_line, vec3(1.0), 0.75), smoothstep(0.0, 0.8, up));
-  sky += vec3(1.0) * smoothstep(0.8, 0.93, dot(Rr, normalize(vec3(-0.55, 0.62, 0.56)))) * 0.9;
-  sky *= 1.0 - 0.45 * smoothstep(0.2, 1.0, dot(Rr, normalize(vec3(0.7, -0.5, 0.5))));
-  vec3 env = mix(floorCol, sky, smoothstep(-0.06, 0.06, Rr.z));
-  env *= 1.0 - 0.7 * exp(-Rr.z * Rr.z / 0.006); // the dark horizon line of a chrome ball
-  float fres = 0.62 + 0.38 * pow(1.0 - z, 3.0);
-  vec3 chrome = env * fres * vec3(0.93, 0.93, 0.98);
-  chrome += vec3(1.0) * pow(max(dot(Rr, LIGHT), 0.0), 180.0) * 1.4;
-  chrome *= 0.55 + 0.45 * smoothstep(-1.0, 0.4, N.y - 0.4 * N.x); // darker underside
   // Contact shadow on the liquid, falling down-right (away from the light).
   vec2 so = (s - u_ball.xy - vec2(0.12, -0.12) * u_ball.z) / u_ball.z;
   float sh = 1.0 - 0.65 * smoothstep(1.45, 0.85, length(so));
   outc.rgb *= sh;
   float disc = clamp((u_ball.z - r * u_ball.z) / u_px + 0.5, 0.0, 1.0);
-  outc = mix(outc, vec4(chrome, 1.0), disc);
+  if (disc > 0.0) {
+    float tr;
+    vec4 cr = surface(fr, gr, tr);
+    vec3 floorCol = cr.rgb + u_gap * (1.0 - cr.a);
+    // Studio sky: a bright, soft gradient (pale lilac-white overhead, darker towards the horizon),
+    // a big window up-left and a small bright key.
+    float up = clamp(Rr.z, 0.0, 1.0);
+    vec3 sky = mix(mix(u_shadow, u_line, 0.45), mix(u_line, vec3(1.0), 0.75), smoothstep(0.0, 0.8, up));
+    sky += vec3(1.0) * smoothstep(0.8, 0.93, dot(Rr, normalize(vec3(-0.55, 0.62, 0.56)))) * 0.9;
+    sky *= 1.0 - 0.45 * smoothstep(0.2, 1.0, dot(Rr, normalize(vec3(0.7, -0.5, 0.5))));
+    vec3 env = mix(floorCol, sky, smoothstep(-0.06, 0.06, Rr.z));
+    env *= 1.0 - 0.7 * exp(-Rr.z * Rr.z / 0.006); // the dark horizon line of a chrome ball
+    float fres = 0.62 + 0.38 * pow(1.0 - z, 3.0);
+    vec3 chrome = env * fres * vec3(0.93, 0.93, 0.98);
+    chrome += vec3(1.0) * pow(max(dot(Rr, LIGHT), 0.0), 180.0) * 1.4;
+    chrome *= 0.55 + 0.45 * smoothstep(-1.0, 0.4, N.y - 0.4 * N.x); // darker underside
+    outc = mix(outc, vec4(chrome, 1.0), disc);
+  }
 
   outc.rgb = min(outc.rgb * u_glow, vec3(outc.a));
   o = outc;
