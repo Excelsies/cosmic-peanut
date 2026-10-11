@@ -41,9 +41,9 @@ export const CROSSFADE_MS = 1500;
 const READY_TIMEOUT_MS = 10_000;
 const REMOVE_DELAY_MS = 100; // let the SDK run dispose() before the iframe goes away
 const RING = 512;
-// WebKit holds a never-clicked cross-origin iframe near 20 fps
+// WebKit holds a never-clicked cross-origin iframe near 20 fps (macOS) or 30 fps (Linux)
 const THROTTLED_MIN_FPS = 15;
-const THROTTLED_MAX_FPS = 25;
+const THROTTLED_MAX_FPS = 35;
 
 /** @param {{ message: string; file?: string; line?: number }} e */
 export function formatError(e) {

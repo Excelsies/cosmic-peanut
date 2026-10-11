@@ -297,10 +297,12 @@ describe("pluginHost", () => {
     const perf = (/** @type {number} */ fps) =>
       pa.emit({ type: "perf", fps, frameMsP50: 2, frameMsP99: 5, pluginMsP50: 1, renderScale: 1, dropped: 0 });
     expect(made[0].iframe.style.pointerEvents).toBe("");
-    perf(21); // WebKit's never-clicked cross-origin iframe rate
+    perf(21); // WebKit's never-clicked cross-origin iframe rate on macOS
     expect(made[0].iframe.style.pointerEvents).toBe("auto");
     perf(60);
     expect(made[0].iframe.style.pointerEvents).toBe("");
+    perf(31); // and on Linux (Playwright's WebKit)
+    expect(made[0].iframe.style.pointerEvents).toBe("auto");
   });
 
   it("judges the throttle against the fps cap, not a fixed rate", () => {
@@ -311,9 +313,9 @@ describe("pluginHost", () => {
     const perf = (/** @type {number} */ fps) =>
       pa.emit({ type: "perf", fps, frameMsP50: 2, frameMsP99: 5, pluginMsP50: 1, renderScale: 1, dropped: 0 });
     const throttled = () => events.filter((e) => e.kind === "perf").at(-1).throttled;
-    perf(35); // a heavy plugin, uncapped: slow, not throttled
+    perf(40); // a heavy plugin, uncapped: slow, not throttled
     expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["", false]);
-    perf(10); // too slow for the ~20 fps throttle: a click wouldn't help
+    perf(10); // too slow for the throttle: a click wouldn't help
     expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["", false]);
     host.setSettings({ fpsCap: 30 }); // Battery
     perf(30);

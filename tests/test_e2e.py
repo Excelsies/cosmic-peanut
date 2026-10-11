@@ -73,7 +73,9 @@ def open_shell(rh: RunningHost, page: Page) -> None:
     page.wait_for_selector("#stage iframe", timeout=10_000)
     # Once the plugin reports its (throttled) rate the shell lets a click through to it.
     page.get_by_role("button", name="Got it").click()  # first-launch photosensitivity notice
-    wait_for(page, lambda: rh.last("perf") is not None)
+    wait_for(
+        page, lambda: (p := rh.last("perf")) is not None and (p["throttled"] or p["fps"] >= 50)
+    )
     page.mouse.click(640, 360)
     assert not errors, errors
 
