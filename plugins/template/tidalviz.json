@@ -8,7 +8,6 @@
       "author": "You",
       "entry": "src/main.js",
       "renderer": "webgl2",
-      "depth": false,
       "thumbnail": "thumbs/halo.jpg",
       "params": [
         { "id": "color", "type": "color", "label": "Color", "default": "#ff7a59" },

@@ -88,9 +88,6 @@ Your code runs in a sandboxed iframe (`sandbox="allow-scripts"`, opaque origin, 
 - Errors in `create`/`frame` are caught; three failing frames in a row unload the visualizer. A
   page blocked for 2 s gets disabled. On WebGL context loss your `dispose` runs and `create` is
   called again.
-- `"depth": false` in `tidalviz.json` saves GPU memory by creating the canvas without a depth
-  buffer; drop it if you depth-test the canvas (`gl.enable(gl.DEPTH_TEST)` without your own
-  framebuffer).
 - Want three.js? Use `"renderer": "three"` with `"libs": ["three"]` and `import * as THREE from "three"`
   (plus `three/addons/...`) — the host provides a pinned copy.
 
