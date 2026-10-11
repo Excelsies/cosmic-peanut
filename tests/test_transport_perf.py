@@ -14,7 +14,7 @@ from tidalviz.server.runner import HostServers
 
 pytestmark = pytest.mark.perf  # wall-clock sensitive; non-blocking in CI
 
-FRAME_BYTES = 10_592  # stereo frame v1
+FRAME_BYTES = 29_024  # stereo frame v1
 RATE_HZ = 48_000 / 512  # ~93.75
 SECONDS = 2.0
 
@@ -43,8 +43,11 @@ async def test_latest_only_delivery_is_fast_on_loopback(tmp_path: Path) -> None:
     try:
         async with (
             aiohttp.ClientSession() as http,
-            http.ws_connect(f"{hs.shell_origin}/ws?token={hs.token}", origin=hs.shell_origin) as ws,
+            http.ws_connect(
+                f"{hs.shell_origin}/ws?token={hs.token}", origin=hs.shell_origin, compress=15
+            ) as ws,
         ):
+            assert ws.compress == 0  # WebKitGTK offers deflate; the host declines it
             while hs.hub.client_count == 0:
                 await asyncio.sleep(0.001)
             publisher = threading.Thread(target=analysis_thread)

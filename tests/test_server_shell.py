@@ -171,6 +171,19 @@ async def test_ws_carries_control_and_frames(
 
 
 @pytest.mark.asyncio
+async def test_ws_declines_permessage_deflate(
+    http: aiohttp.ClientSession, server: ShellServer
+) -> None:
+    # WebKitGTK's libsoup offers deflate; compressing frames on loopback only costs CPU.
+    async with http.ws_connect(f"/ws?token={TOKEN}", origin=server.origin, compress=15) as ws:
+        assert ws.compress == 0
+        await wait_for(lambda: server.hub.client_count == 1)
+        server.hub.publish(bytes(29_024))
+        msg = await ws.receive(timeout=1)
+        assert msg.type == aiohttp.WSMsgType.BINARY and len(msg.data) == 29_024
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("query", "origin"),
     [

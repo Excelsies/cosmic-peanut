@@ -155,6 +155,9 @@ The import map is included only when the entry declares `libs: ["three"]`.
 
 ## 4. Control WebSocket (shell ⇄ host)
 
+The host declines every WebSocket extension (no `permessage-deflate`): frames are sent
+uncompressed, since compressing on loopback only costs CPU on both ends.
+
 Binary messages host→shell are frames (§1). Text messages are JSON `{ "type": ..., ... }` in both
 directions. Receivers ignore unknown types and validate the fields of known ones. The host drops
 inbound text over 64 KB, ignores inbound binary, and rejects non-finite numbers (`NaN`).

@@ -69,7 +69,7 @@ class ShellServer(LocalServer):
         self._require_token(request)
         if request.headers.getall("Origin", []) != [self.origin]:
             raise web.HTTPForbidden()
-        ws = web.WebSocketResponse(max_msg_size=WS_MAX_MSG_SIZE)
+        ws = web.WebSocketResponse(max_msg_size=WS_MAX_MSG_SIZE, compress=False)
         await ws.prepare(request)
         self.hub.add(ws)
         try:
