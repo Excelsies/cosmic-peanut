@@ -56,6 +56,9 @@ export default async function create(ctx) {
   const fields = createTarget(gl);
   fields.resize(1, 1); // complete before the first cloud pass
   const vao = gl.createVertexArray();
+  gl.useProgram(prog.program);
+  gl.uniform1i(u.u_lev, 0);
+  gl.uniform1i(u.u_fields, 1);
 
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -78,6 +81,14 @@ export default async function create(ctx) {
   let rot = 0;
   let clock = 0;
   let mid = 0;
+
+  function applyParams() {
+    tintGamma(ctx.params.tint, gamma);
+    gl.useProgram(prog.program);
+    gl.uniform3f(u.u_gamma, gamma[0], gamma[1], gamma[2]);
+    gl.uniform1f(u.u_sky, skyAlpha(ctx.params.sky));
+  }
+  applyParams();
 
   return {
     frame(audio, time) {
@@ -109,7 +120,6 @@ export default async function create(ctx) {
 
       const { width: w, height: h } = ctx.size;
       fitEclipse(w, h, layout);
-      tintGamma(p.tint, gamma);
 
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
@@ -129,6 +139,7 @@ export default async function create(ctx) {
         gl.uniform1f(cu.u_outer, outer);
         gl.uniform1f(cu.u_time, clock);
         gl.uniform1f(cu.u_th, th);
+        gl.uniform1f(cu.u_mask, (4 * CLOUD_DIV) / layout.radius);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
 
@@ -142,8 +153,6 @@ export default async function create(ctx) {
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, fields.tex);
       gl.useProgram(prog.program);
-      gl.uniform1i(u.u_lev, 0);
-      gl.uniform1i(u.u_fields, 1);
       gl.uniform2f(u.u_res, w, h);
       gl.uniform1f(u.u_fieldTexel, 1 / fields.width);
       gl.uniform1f(u.u_th, th);
@@ -157,9 +166,11 @@ export default async function create(ctx) {
       gl.uniform1f(u.u_reach, REACH * Number(p.reach) * Math.min(1.5, react));
       gl.uniform1f(u.u_clouds, clouds);
       gl.uniform2fv(u.u_flares, flareOut);
-      gl.uniform3f(u.u_gamma, gamma[0], gamma[1], gamma[2]);
-      gl.uniform1f(u.u_sky, skyAlpha(p.sky));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+    },
+
+    params() {
+      applyParams();
     },
 
     dispose() {

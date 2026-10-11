@@ -11,6 +11,7 @@ uniform float u_radius; // canvas px per unit
 uniform float u_outer;  // ring outer radius, units
 uniform float u_time;   // drift clock, s
 uniform float u_th;     // the edge threshold eclipse.frag cuts the density at
+uniform float u_mask;   // 4 field texels in units: wider than what eclipse.frag reads around a pixel
 
 in vec2 v_uv;
 out vec4 outColor;
@@ -27,6 +28,12 @@ float fbm2(vec2 p) {
 void main() {
   vec2 p = (v_uv * u_res - u_center) / u_radius;
   float r = length(p);
+  // No clouds (env = 0) inside the ring or past r = 2, nor within u_mask of it: the density is
+  // −0.25, so no pixel that reads this texel shows cloud, whatever the other channels hold.
+  if (r < u_outer + 0.06 - u_mask || r > 2.0 + u_mask) {
+    outColor = vec4(0.375, 0.5, 0.5, 0.5);
+    return;
+  }
   vec2 c = p * 1.25;
   float tc = u_time * 0.015;
   vec2 w1 = vec2(fbm(c + vec2(0.0, tc)), fbm(c + vec2(5.2, 1.3 - tc)));
