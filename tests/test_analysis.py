@@ -33,6 +33,19 @@ def test_silence_is_flagged_and_reads_zero():
     assert np.all(f.bands == 0.0) and np.all(f.spectrum == 0.0)
 
 
+def test_bands_release_to_exactly_zero_after_music_stops():
+    src = SyntheticSource("demo")
+    orig, hops = src.render, [0]
+
+    def render(n: int) -> np.ndarray:
+        hops[0] += 1
+        return orig(n) if hops[0] <= 300 else np.zeros((n, 2), dtype=np.float32)
+
+    src.render = render  # type: ignore[method-assign]
+    f = last(src, 300 / 93.75 + 7.0)  # release from 1.0 passes 1e-9 after ~6.2 s
+    assert np.all(f.bands == 0.0)  # not stuck at a float32 subnormal
+
+
 def test_level_reports_raw_rms_and_peak_of_the_newest_hop():
     f = last(SyntheticSource("sine1k"), 0.2)
     assert not f.silent

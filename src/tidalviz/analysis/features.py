@@ -124,6 +124,7 @@ class Bands:
     TILT_DB_PER_OCTAVE = 3.0
     DB_FLOOR, DB_CEIL = -70.0, -10.0
     RELEASE_S = 0.3  # attack is instant
+    FLUSH = np.float32(1e-9)  # else release ends stuck at a float32 subnormal, never 0
 
     def __init__(self, ctx: AnalysisContext) -> None:
         s = ctx.settings
@@ -160,6 +161,7 @@ class Bands:
         self._lv: F32 = np.zeros(s.n_bands, dtype=np.float32)
         self._level_floor = np.float32(-10.0 / db_range)  # Onset sees down to floor − 10 dB
         self._decay = np.float32(math.exp(-ctx.dt / self.RELEASE_S))
+        self._tiny = np.zeros(s.n_bands, dtype=np.bool_)  # released below FLUSH: snaps to 0
         # Two level buffers alternate so Onset can compare against the previous hop, no copy.
         self._levels: F32 = np.zeros((2, s.n_bands), dtype=np.float32)
 
@@ -181,6 +183,9 @@ class Bands:
         # never below 0 because it starts at 0): bands = max(min(level, 1), bands · decay).
         bands = out.bands
         np.multiply(bands, self._decay, out=bands)
+        if ctx.silent:  # only silence needs to settle at exact zeros
+            np.less(bands, self.FLUSH, out=self._tiny)
+            np.copyto(bands, 0.0, where=self._tiny)
         np.maximum(bands, lv, out=bands)
 
 
