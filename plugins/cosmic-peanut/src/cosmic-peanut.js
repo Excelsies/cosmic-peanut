@@ -85,16 +85,20 @@ export default async function create(ctx) {
   let softW = 0;
   let softH = 0;
   let softPath = "";
+  /** Rings go straight to the canvas: Fine lines, or plain Soft lines whose upscale would be 1:1. */
+  let direct = false;
   function resizeSoft() {
     const w = Math.max(1, Math.min(ctx.size.width, Math.round(ctx.size.cssWidth)));
     const h = Math.max(1, Math.min(ctx.size.height, Math.round(ctx.size.cssHeight)));
     const path = renderPath(ctx.params.lines, ctx.params.antialias);
-    if (w === softW && h === softH && path === softPath) return;
+    const toCanvas = path === "canvas" || (path === "soft" && w === ctx.size.width && h === ctx.size.height);
+    if (w === softW && h === softH && path === softPath && toCanvas === direct) return;
     softW = w;
     softH = h;
     softPath = path;
+    direct = toCanvas;
     const msaaOn = path === "msaa";
-    const texOn = path !== "canvas";
+    const texOn = !direct;
     // Buffers a path doesn't use keep only a 1×1 placeholder, so their memory is freed.
     gl.bindTexture(gl.TEXTURE_2D, softTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, texOn ? w : 1, texOn ? h : 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
@@ -133,7 +137,7 @@ export default async function create(ctx) {
       const dist = cameraDistance(amp, aspect);
       camera.writeMatrices(aspect, dist);
 
-      if (fine) {
+      if (direct) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, width, height);
       } else {
@@ -164,7 +168,7 @@ export default async function create(ctx) {
       gl.drawElements(gl.LINE_STRIP, indexCount, gl.UNSIGNED_INT, 0);
       gl.disable(gl.BLEND);
 
-      if (!fine) {
+      if (!direct) {
         if (path === "msaa") {
           gl.bindFramebuffer(gl.READ_FRAMEBUFFER, msaaFbo);
           gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, softFbo);

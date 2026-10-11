@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import create from "./cosmic-peanut.js";
+import { ringGain } from "./lib/params.js";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (/** @type {string} */ p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -13,6 +14,8 @@ const DEFAULTS = Object.fromEntries(
 const AUDIO = { waveform: new Float32Array(2048), bass: 1 };
 const TIME = { dt: 1 / 60, now: 0 };
 
+/** @typedef {{ name: string, args: any[], fb: any, viewport: number[], program: any }} Draw */
+
 /**
  * Recording WebGL2 stand-in: enums are their own names, created objects are tagged, every call is
  * logged as [name, ...args] and every draw with the framebuffer, viewport and program it hit.
@@ -22,7 +25,7 @@ const TIME = { dt: 1 / 60, now: 0 };
 function fakeGL() {
   /** @type {any[][]} */
   const calls = [];
-  /** @type {{ name: string, args: any[], fb: any, viewport: number[], program: any }[]} */
+  /** @type {Draw[]} */
   const draws = [];
   /** @type {any} */
   let program = null;
@@ -104,6 +107,22 @@ const softTextures = (/** @type {any} */ gl) =>
     .filter((/** @type {any[]} */ c) => c[0] === "texImage2D" && c[3] === "RGBA8")
     .map((/** @type {any[]} */ c) => [c[4], c[5]]);
 
+/**
+ * Run one frame and return its draws.
+ * @param {any} gl
+ * @param {any} viz
+ * @returns {Draw[]}
+ */
+function frameDraws(gl, viz) {
+  const n = gl.draws.length;
+  viz.frame(AUDIO, TIME);
+  return gl.draws.slice(n);
+}
+
+/** Value last given to the uniform `name`. @param {any} gl @param {string} name */
+const lastUniform = (gl, name) =>
+  gl.calls.findLast((/** @type {any[]} */ c) => c[0].startsWith("uniform") && c[1].name === name)?.[2];
+
 describe("cosmic-peanut GL", () => {
   it("holds only a 1×1 soft texture in Fine lines, and frees it again on Soft → Fine", async () => {
     const { gl, setParams } = await setup({ params: { lines: "fine" } });
@@ -112,5 +131,35 @@ describe("cosmic-peanut GL", () => {
     expect(softTextures(gl).at(-1)).toEqual([1280, 720]);
     setParams({ lines: "fine" });
     expect(softTextures(gl).at(-1)).toEqual([1, 1]);
+  });
+
+  it("draws plain Soft lines straight to the canvas when the 1× buffer would be canvas-sized", async () => {
+    const { gl, ctx, viz, setParams } = await setup({ dpr: 1, css: [2560, 1440], params: { antialias: false } });
+    expect(softTextures(gl).at(-1)).toEqual([1, 1]);
+    expect(frameDraws(gl, viz).map((d) => [d.fb, d.viewport])).toEqual([[null, [0, 0, 2560, 1440]]]);
+    expect(lastUniform(gl, "uGain")).toBe(ringGain(DEFAULTS.bright, 240, false)); // still Soft gain
+
+    Object.assign(ctx.size, { width: 5120, height: 2880, dpr: 2 }); // same CSS size, now DPR 2
+    viz.resize?.(ctx.size);
+    expect(softTextures(gl).at(-1)).toEqual([2560, 1440]);
+    expect(frameDraws(gl, viz).length).toBe(2);
+    setParams({ antialias: true });
+    expect(frameDraws(gl, viz).length).toBe(2);
+  });
+
+  it("keeps the 1× buffer and its upscale when it is smaller than the canvas, or multisampled", async () => {
+    for (const [dpr, antialias] of [
+      [2, false],
+      [2, true],
+      [1, true],
+    ]) {
+      const { gl, viz } = await setup({ dpr: Number(dpr), params: { antialias } });
+      const [rings, blit, ...rest] = frameDraws(gl, viz);
+      expect(rings.fb).not.toBeNull();
+      expect(rings.viewport).toEqual([0, 0, 1280, 720]);
+      expect([blit.name, blit.fb, blit.viewport]).toEqual(["drawArrays", null, [0, 0, 1280 * Number(dpr), 720 * Number(dpr)]]);
+      expect(rest).toEqual([]);
+      expect(softTextures(gl).at(-1)).toEqual([1280, 720]);
+    }
   });
 });
