@@ -49,8 +49,8 @@ pole.
 
 ## Rendering spec
 
-All geometry is computed on the GPU from a static vertex grid and a waveform history texture, so
-the CPU work per display frame is a handful of uniforms and one draw call.
+All geometry is computed on the GPU from vertex and instance indices and a waveform history
+texture, so the CPU work per display frame is a handful of uniforms and one draw call.
 
 ### Ring history
 
@@ -77,9 +77,10 @@ Here R = 1 is the sphere radius, A is the Amplitude parameter, and p is the curr
 1–3%.
 
 - Draw every ring as a closed `LINE_STRIP` of M + 1 vertices (the last repeats point 0), all in one
-  `drawElements` call, using primitive restart (`0xFFFFFFFF` with `UNSIGNED_INT` indices) between
-  rings.
-- The vertex attribute is just (j, i). Everything else comes from uniforms and the texture.
+  `drawArraysInstanced` call with one instance per ring (instanced strips never join), so there are
+  no vertex or index buffers.
+- A vertex knows only (j, i) = (`gl_VertexID`, `gl_InstanceID`). Everything else comes from
+  uniforms and the texture.
 
 ### Turning a waveform into a ring
 
@@ -195,13 +196,14 @@ It must stay well inside the Tidalviz budgets, so it can run next to crossfades 
 
 Implementation rules:
 
-- Build the vertex and index buffers once per density change, never per frame.
+- Reallocate the history texture once per density change, never per frame.
 - Reuse typed arrays for the ring, the projection matrix and the view matrix. The prototype
   allocates new matrices each frame; fix this.
 - Upload at most the rows pushed since the last frame, one row each. At 7 s travel time and Dense
   density that's about 57 rows per second.
 - Trigger search, resampling and gain run only when a ring is pushed, not every display frame.
-- Skip the offscreen pass entirely in Fine lines mode.
+- Skip the offscreen pass entirely in Fine lines mode, and in plain Soft lines when the 1× buffer
+  would be canvas-sized (the upscale would be a 1:1 copy).
 - Handle `webglcontextlost` through the SDK. Rebuilding from scratch is fine; the ring history may
   start over.
 

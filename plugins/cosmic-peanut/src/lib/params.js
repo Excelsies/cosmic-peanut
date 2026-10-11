@@ -30,8 +30,9 @@ export function ringGain(bright, N, fine) {
 
 /**
  * Where the rings are drawn this frame. Fine lines: straight to the canvas at native DPR.
- * Soft lines: a 1× buffer upscaled to the canvas — multisampled (2× MSAA, ~7.5 MB more GPU
- * memory at 1440p) when the Antialias param is on, plain when it's off.
+ * Soft lines: a 1× buffer upscaled to the canvas — multisampled (2× MSAA, 8 B more GPU memory
+ * per CSS pixel: ~7.4 MB at 1280×720, ~29.5 MB at 2560×1440) when the Antialias param is on,
+ * plain when it's off.
  * @param {unknown} lines `lines` select ("soft" | "fine")
  * @param {unknown} antialias `antialias` boolean (missing ⇒ on, the manifest default)
  * @returns {"canvas" | "msaa" | "soft"}

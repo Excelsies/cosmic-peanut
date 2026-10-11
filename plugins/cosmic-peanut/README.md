@@ -19,8 +19,8 @@ slightly and brightens a touch. Built-in `webgl2` visualizer; spec in
 | `bright` | Brightness | 1 | 0.2–2 | Overall gain |
 | `density` | Rings | medium | sparse 120 / medium 240 / dense 400 | Rings alive at once (reallocates the history) |
 | `palette` | Palette | nebula | nebula / ember / phosphor | Color ramp by age |
-| `lines` | Lines | soft | soft / fine | Soft: 1× multisampled buffer upscaled (slight glow). Fine: native resolution, gain × 1.35 |
-| `antialias` | Antialias soft lines | on | on / off | 2× MSAA for soft lines, matching the prototype's smoothness. Off saves ~7.5 MB of GPU memory at 1440p (total ~6 MB vs ~13.5 MB) |
+| `lines` | Lines | soft | soft / fine | Soft: 1× multisampled buffer upscaled (slight glow on HiDPI canvases). Fine: native resolution, gain × 1.35 |
+| `antialias` | Antialias soft lines | on | on / off | 2× MSAA for soft lines, matching the prototype's smoothness. Costs 8 B per CSS pixel (see GPU memory below) |
 
 Drag to orbit (0.006 rad/px); letting go resumes the self-orbit from there. With macOS Reduce
 motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off their defaults.
@@ -35,10 +35,11 @@ motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off t
 - **History** (`history.js`, `scheduler.js`): rings go into an M × N `R32F` texture used as a
   circular buffer, one `texSubImage2D` row per ring. Rings are pushed at a fixed N ÷ travel per
   second from a `dt` accumulator; the leftover fraction moves every ring continuously between
-  pushes. Unwritten rows hold a sentinel (1e6) and are invisible.
-- **Geometry** (`geometry.js`, `shaders/rings.vert`): a static grid of (j, i) vertices drawn as
-  one `LINE_STRIP` `drawElements` call with primitive restart; the vertex shader places point j of
-  ring i at latitude π·age, radius (1 + amp·s)(1 + 0.06·p).
+  pushes. Unwritten rows hold a sentinel (1e6); the vertex shader clips those rings whole, and
+  the oldest ring (fully faded) isn't drawn.
+- **Geometry** (`shaders/rings.vert`): one `drawArraysInstanced` call, a `LINE_STRIP` of M + 1
+  points per ring with no vertex or index buffers; the vertex shader places point j =
+  `gl_VertexID` of ring i = `gl_InstanceID` at latitude π·age, radius (1 + amp·s)(1 + 0.06·p).
 - **Color** (`shaders/rings.frag`): additive blending, cosine palette by age, depth cue from view
   depth, newest brightest, gain × √(240 ÷ N).
 - **Transparency**: the canvas is transparent and premultiplied. Each fragment outputs
@@ -50,5 +51,15 @@ motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off t
   `audio.bass`.
 - **Camera** (`camera.js`): yaw += orbit·dt, pitch sways ±0.3 rad around 0.42, framed to fit the
   sphere at full swell (also in portrait). Matrices are written into preallocated arrays.
+
+GPU memory for a 2560×1440 canvas at Medium (the 0.5 MB history texture included; Dense adds
+0.3 MB). Soft lines use CSS-pixel buffers, 4× larger at DPR 1 than at DPR 2; at 1:1 plain Soft
+lines draw straight to the canvas, and buffers a mode doesn't use shrink to 1×1.
+
+| Lines | DPR 2 | DPR 1 |
+| --- | --- | --- |
+| Soft, antialias on (2× MSAA + resolve texture) | ~11.6 MB | ~44.7 MB |
+| Soft, antialias off (resolve texture) | ~4.2 MB | ~0.5 MB |
+| Fine | ~0.5 MB | ~0.5 MB |
 
 `frame()` allocates nothing. Tests: `cd web && npx vitest run ../plugins/cosmic-peanut`.

@@ -4,7 +4,7 @@
 // summed alpha always covers the summed colour and the rings composite as light over any backdrop.
 precision highp float;
 
-in float vAge, vDepth, vSample, vEmpty;
+in float vAge, vDepth, vSample;
 uniform float uCamDist, uRadius, uGain, uPalette, uPulse;
 out vec4 o;
 
@@ -20,6 +20,6 @@ void main() {
   float depthFade = mix(1.0, 0.16, back);
   float fresh = mix(1.5, 0.35, vAge);
   vec3 c = pal(vAge * 0.55 - uPulse * 0.08) + abs(vSample) * 0.35 + uPulse * 0.12;
-  c *= edges * depthFade * fresh * uGain * (1.0 - vEmpty);
+  c *= edges * depthFade * fresh * uGain;
   o = vec4(c, max(c.r, max(c.g, c.b)));
 }
