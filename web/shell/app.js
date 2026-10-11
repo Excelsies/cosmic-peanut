@@ -317,11 +317,17 @@ export function createApp(deps) {
       paramsBody.replaceChildren(h("p", { class: "muted" }, "No visualizer selected."));
       return;
     }
-    renderParams(paramsBody, v.params, valuesFor(v), (all, changed) => {
-      values.set(v.key, all);
-      send({ type: "params", key: v.key, values: all });
-      if (pluginHost.activeKey === v.key || pluginHost.pendingKey === v.key) pluginHost.setParams(changed);
-    });
+    // Live to the plugin on input, saved on change: each params message rewrites the file.
+    renderParams(
+      paramsBody,
+      v.params,
+      valuesFor(v),
+      (all, changed) => {
+        values.set(v.key, all);
+        if (pluginHost.activeKey === v.key || pluginHost.pendingKey === v.key) pluginHost.setParams(changed);
+      },
+      (all) => send({ type: "params", key: v.key, values: all }),
+    );
   }
 
   function renderSources() {

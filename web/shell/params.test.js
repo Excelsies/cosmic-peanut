@@ -13,8 +13,9 @@ const specs = [
 function setup(values = {}) {
   const el = document.createElement("div");
   const onChange = vi.fn();
-  renderParams(el, specs, { ...defaultValues(specs), ...values }, onChange);
-  return { el, onChange };
+  const onSave = vi.fn();
+  renderParams(el, specs, { ...defaultValues(specs), ...values }, onChange, onSave);
+  return { el, onChange, onSave };
 }
 
 describe("params panel", () => {
@@ -52,6 +53,33 @@ describe("params panel", () => {
     expect(onChange.mock.lastCall?.[0].mode).toBe("b");
   });
 
+  it("saves a slider or colour when it's released, other controls at once", () => {
+    const { el, onChange, onSave } = setup();
+    const speed = /** @type {HTMLInputElement} */ (el.querySelector("#param-speed"));
+    speed.value = "0.5";
+    speed.dispatchEvent(new Event("input"));
+    speed.value = "0.7";
+    speed.dispatchEvent(new Event("input"));
+    expect(onSave).not.toHaveBeenCalled();
+    speed.dispatchEvent(new Event("change"));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenLastCalledWith({ speed: 0.7, tint: "#ff0000", mirror: false, mode: "a" });
+    expect(onChange).toHaveBeenCalledTimes(2);
+    const tint = /** @type {HTMLInputElement} */ (el.querySelector("#param-tint"));
+    tint.value = "#00ff00";
+    tint.dispatchEvent(new Event("input"));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    tint.dispatchEvent(new Event("change"));
+    expect(onSave).toHaveBeenLastCalledWith({ speed: 0.7, tint: "#00ff00", mirror: false, mode: "a" });
+    const mirror = /** @type {HTMLInputElement} */ (el.querySelector("#param-mirror"));
+    mirror.checked = true;
+    mirror.dispatchEvent(new Event("change"));
+    expect(onSave).toHaveBeenLastCalledWith({ speed: 0.7, tint: "#00ff00", mirror: true, mode: "a" });
+    /** @type {HTMLButtonElement} */ (el.querySelector("button.reset")).click();
+    expect(onSave).toHaveBeenLastCalledWith({ speed: 1, tint: "#ff0000", mirror: false, mode: "a" });
+    expect(onSave).toHaveBeenCalledTimes(4);
+  });
+
   it("reset restores defaults and updates the controls", () => {
     const { el, onChange } = setup({ speed: 2, mirror: true });
     const reset = /** @type {HTMLButtonElement} */ (el.querySelector("button.reset"));
@@ -69,7 +97,7 @@ describe("params panel", () => {
 
   it("says so when there are no parameters", () => {
     const el = document.createElement("div");
-    renderParams(el, [], {}, () => {});
+    renderParams(el, [], {}, () => {}, () => {});
     expect(el.textContent).toContain("No parameters");
   });
 });

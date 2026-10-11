@@ -112,15 +112,18 @@ describe("app: hello and selection", () => {
     expect(last("select")).toEqual({ type: "select", key: "builtin/orb" });
   });
 
-  it("params panel sends full values and forwards changes to the plugin", () => {
+  it("params panel forwards changes to the plugin live and saves full values on change", () => {
     const { app, root, host, last } = setup();
     app.handle(hello());
     const hue = /** @type {HTMLInputElement} */ (root.querySelector("#param-hue"));
     expect(hue.value).toBe("120");
     hue.value = "300";
     hue.dispatchEvent(new Event("input"));
-    expect(last("params")).toEqual({ type: "params", key: "builtin/bars", values: { hue: 300 } });
     expect(host.setParams).toHaveBeenLastCalledWith({ hue: 300 });
+    expect(last("params")).toBeUndefined(); // each params message rewrites settings.json
+    hue.dispatchEvent(new Event("change"));
+    expect(last("params")).toEqual({ type: "params", key: "builtin/bars", values: { hue: 300 } });
+    expect(host.setParams).toHaveBeenCalledTimes(1);
     // switching away and back keeps the value
     app.select("builtin/orb");
     app.select("builtin/bars");
