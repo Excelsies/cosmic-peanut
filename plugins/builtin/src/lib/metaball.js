@@ -57,3 +57,54 @@ export function bridgeDistance(r, k) {
 export function boundRadius(maxDist, maxR, k) {
   return maxDist + maxR + k * 0.25;
 }
+
+/** The camera of shaders/tetraballs/common.glsl: distance on +z, tan(half vertical field of view). */
+export const CAM = 5;
+export const TANF = 0.42;
+
+/**
+ * Scissor rectangles for a reduced-resolution pass (tw × th) that writes 0 wherever the ray misses
+ * the sphere at (0, cy, 0) of radius r, and for its bilinear upscale onto the canvas (cw × ch),
+ * blended so that 0 changes nothing. out = [vx0, vy0, vx1, vy1, cx0, cy0, cx1, cy1], half-open, in
+ * window pixels (y up): the pass covers every texel the upscale samples inside its rectangle, and
+ * every canvas pixel outside it samples only texels whose rays miss. The whole frame when the
+ * camera is (nearly) inside the sphere.
+ * @param {number} cy @param {number} r @param {number} cw @param {number} ch @param {number} tw @param {number} th
+ * @param {Int32Array} out
+ */
+export function volumeScissor(cy, r, cw, ch, tw, th, out) {
+  const q = CAM * CAM - r * r;
+  if (q < 0.01 * CAM * CAM) {
+    out.set([0, 0, tw, th, 0, 0, cw, ch]);
+    return out;
+  }
+  // Slopes of the planes through the eye tangent to the sphere (x = s·depth, y = s·depth).
+  const sx = r / Math.sqrt(q);
+  const k = r * Math.sqrt(cy * cy + q);
+  // Texel-space extent of the projection, one texel wider for float32 rounding in the shader.
+  const ax = (sx / TANF) * 0.5 * th + 1;
+  const ay0 = 0.5 * th + ((cy * CAM - k) / q / TANF) * 0.5 * th - 1;
+  const ay1 = 0.5 * th + ((cy * CAM + k) / q / TANF) * 0.5 * th + 1;
+  axis(0.5 * tw - ax, 0.5 * tw + ax, tw, cw, out, 0);
+  axis(ay0, ay1, th, ch, out, 1);
+  return out;
+}
+
+/**
+ * One axis of {@link volumeScissor}: texels whose centres lie outside [a0, a1] are 0.
+ * @param {number} a0 @param {number} a1 @param {number} t @param {number} c @param {Int32Array} out @param {number} i
+ */
+function axis(a0, a1, t, c, out, i) {
+  const lo = Math.floor(a0);
+  const hi = Math.ceil(a1);
+  out[i] = clampInt(lo - 4, 0, t);
+  out[i + 2] = clampInt(hi + 4, 0, t);
+  // Canvas pixel X samples the texels around u = (X + ½)·t/c − ½: keep those within 1.5 texels.
+  out[i + 4] = clampInt(Math.floor(((lo - 1.5) * c) / t - 0.5), 0, c);
+  out[i + 6] = clampInt(Math.ceil(((hi + 1.5) * c) / t - 0.5) + 1, 0, c);
+}
+
+/** @param {number} x @param {number} lo @param {number} hi */
+function clampInt(x, lo, hi) {
+  return Math.min(hi, Math.max(lo, x));
+}

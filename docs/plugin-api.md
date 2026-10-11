@@ -150,7 +150,9 @@ Renderer details:
 - **`2d`** — `ctx.ctx2d` is a `CanvasRenderingContext2D`.
 - **`webgl2`** — `ctx.gl`, created with `powerPreference: "high-performance"`, `antialias: false`,
   `preserveDrawingBuffer: false`, and `depth: false` when the manifest says so. The default
-  framebuffer is cleared by the browser each frame; keep feedback effects in your own framebuffers.
+  framebuffer is cleared by the browser after each frame you draw (a `frame` that draws nothing
+  leaves the last image on screen, as do the frames the fps cap skips); keep feedback effects in
+  your own framebuffers.
 - **`webgpu`** — `ctx.gpu = { adapter, device, context, format }`, context already configured.
   List a `fallback` entry for machines without WebGPU.
 - **`three`** — declare `"libs": ["three"]`. `ctx.three = { THREE, renderer, scene, camera,

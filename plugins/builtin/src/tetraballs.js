@@ -18,7 +18,7 @@
 import { hexToRgb } from "./lib/color.js";
 import { createFlashLimiter } from "./lib/flash.js";
 import { createProgram, createTarget } from "./lib/gl.js";
-import { boundRadius } from "./lib/metaball.js";
+import { boundRadius, volumeScissor } from "./lib/metaball.js";
 import { createIntensity, createSequencer, MATERIALS, VOLUMETRIC } from "./lib/tetra-material.js";
 import { createBalls, createTumble, effectiveMotion, tetraVertices } from "./lib/tetra-motion.js";
 
@@ -60,6 +60,7 @@ export default async function create(ctx) {
   const ball = new Float32Array(16);
   const tint = new Float32Array(3);
   const bound = new Float32Array(4);
+  const scissor = new Int32Array(8);
   readTint();
 
   function quality() {
@@ -153,14 +154,17 @@ export default async function create(ctx) {
         sizeTarget();
         const fire = (seq.a === FIRE ? 1 - mix : 0) + (seq.b === FIRE && seq.b !== seq.a ? mix : 0);
         const smoke = (seq.a === SMOKE ? 1 - mix : 0) + (seq.b === SMOKE && seq.b !== seq.a ? mix : 0);
+        // Flames and smoke rise: march a larger sphere, raised above the blob. Both passes are
+        // scissored to it: the volume is 0 outside, and the composite of 0 changes nothing.
+        const r = bound[3];
+        const sc = volumeScissor(r * 0.55, r * 1.65, w, h, target.width, target.height, scissor);
         gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
         gl.viewport(0, 0, target.width, target.height);
-        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.enable(gl.SCISSOR_TEST);
+        gl.scissor(sc[0], sc[1], sc[2] - sc[0], sc[3] - sc[1]);
         gl.useProgram(vol.program);
         const v = vol.u;
         sceneUniforms(v, target.width, target.height, time.now, lightNow);
-        // Flames and smoke rise: march a larger sphere, raised above the blob.
-        const r = bound[3];
         gl.uniform4f(v.u_vbound, 0, r * 0.55, 0, r * 1.65);
         gl.uniform1f(v.u_fire, fire);
         gl.uniform1f(v.u_smoke, smoke);
@@ -169,6 +173,7 @@ export default async function create(ctx) {
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.viewport(0, 0, w, h);
+        gl.scissor(sc[4], sc[5], sc[6] - sc[4], sc[7] - sc[5]);
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         gl.useProgram(comp.program);
@@ -177,6 +182,7 @@ export default async function create(ctx) {
         gl.uniform1i(comp.u.u_vol, 0);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         gl.disable(gl.BLEND);
+        gl.disable(gl.SCISSOR_TEST);
       }
     },
 

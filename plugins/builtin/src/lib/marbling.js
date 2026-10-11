@@ -60,6 +60,11 @@ export function dropInverse(cx, cy, r2, px, py, out) {
  */
 export const DRAG_CONTRACTION = 0.25;
 export const DRAG_ITERS = 7;
+/**
+ * Kernel widths σ past |v| beyond which a stylus step moves nothing: |v|·e^−4.5² ≈ 6e−12 page,
+ * under half a float32 ulp of any pixel coordinate. Mirrored in events.glsl.
+ */
+export const DRAG_REACH = 4.5;
 
 /**
  * One step of the stylus (a rake tine) moving by v from s: paint near it is dragged along,
@@ -97,7 +102,9 @@ export function dragForward(sx, sy, vx, vy, invS2, px, py, out) {
 export function dragInverse(sx, sy, vx, vy, invS2, px, py, out) {
   let x = px;
   let y = py;
-  for (let i = 0; i < DRAG_ITERS; i++) {
+  const reach = Math.hypot(vx, vy) + DRAG_REACH / Math.sqrt(invS2);
+  const n = (px - sx) ** 2 + (py - sy) ** 2 < reach * reach ? DRAG_ITERS : 0;
+  for (let i = 0; i < n; i++) {
     const dx = x - sx;
     const dy = y - sy;
     const f = Math.exp(-(dx * dx + dy * dy) * invS2);

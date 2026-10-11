@@ -61,9 +61,13 @@ vec2 limb(vec2 q, float x0, float r0, float s, float l, float w0, float ku, floa
 vec2 tree(vec2 q, float c, float n, float L, float W, float ku, float px, int forks, float time) {
   float cm = mod(c, n);
   vec4 h = hash4(vec2(cm, n));
+  // Every limb ends before the trunk's tip l0 (≤ 1.2 lr, clump ≤ 1.2): past it, nothing to draw.
+  float lr = L * (0.3 + 0.7 * h.y);
+  if (q.y >= 1.2 * lr) return vec2(0.0);
   float clump = 0.4 + 0.8 * smoothstep(-0.3, 0.35, gnoise(vec2(cm / 6.0, 0.5 + time * 0.02), n / 6.0));
   float x0 = c + 0.5 + 0.5 * (h.x - 0.5);
-  float l0 = L * (0.3 + 0.7 * h.y) * clump;
+  float l0 = lr * clump;
+  if (q.y >= l0) return vec2(0.0);
   float s0 = (h.w - 0.5) * 1.5;
   float w0 = W * (0.6 + 0.8 * h.z) * (0.7 + 0.3 * clump);
   vec2 v = limb(q, x0, 0.0, s0, l0, w0, ku, px);
@@ -77,6 +81,8 @@ vec2 tree(vec2 q, float c, float n, float L, float W, float ku, float px, int fo
     float sb = s0 + dir * (2.5 + 5.0 * g.y);
     float lb = (1.0 - f) * l0 * (0.4 + 0.5 * g.z);
     float wb = w0 * pow(1.0 - f, 0.75) * 0.75;
+    float tb = (q.y - rb) / lb; // limb()'s t: outside the branch is outside its twigs too
+    if (tb < 0.0 || tb > 1.0) continue;
     v = max(v, vec2(0.88, 0.8) * limb(q, xb, rb, sb, lb, wb, ku, px));
     for (int k = 0; k < 2; k++) {
       float e = 0.2 + 0.3 * float(k) + 0.2 * fract(g.w * float(7 + 5 * k)); // twig fork along the branch
@@ -186,7 +192,7 @@ void main() {
   v *= clamp((r - inner) / px + 0.5, 0.0, 1.0); // the disc is pure black
   v = clamp(v, 0.0, 1.0);
 
-  vec3 col = pow(vec3(v), u_gamma);
+  vec3 col = u_gamma == vec3(1.0) ? vec3(v) : pow(vec3(v), u_gamma);
   float a = mix(max(col.r, max(col.g, col.b)), 1.0, u_sky);
   outColor = vec4(col, a);
 }
