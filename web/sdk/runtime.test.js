@@ -606,6 +606,20 @@ describe("reduced motion and pointer input", () => {
     expect(pointer.mock.calls[1][0]).toMatchObject({ kind: "move", x: 15, y: 18, dx: 5, dy: -2 });
   });
 
+  it("rejects a non-finite coordinate in any field and reports a throwing pointer hook", async () => {
+    const pointer = vi.fn(() => {
+      throw new Error("oops");
+    });
+    const h = harness({ plugin: { frame: vi.fn(), pointer } });
+    await h.rt.start();
+    for (const bad of [{ x: NaN }, { y: Infinity }, { dx: null }, { dy: undefined }]) {
+      h.rt.handleMessage({ type: "pointer", kind: "move", x: 1, y: 1, dx: 0, dy: 0, ...bad });
+    }
+    expect(pointer).not.toHaveBeenCalled();
+    h.rt.handleMessage({ type: "pointer", kind: "move", x: 1, y: 1, dx: 0, dy: 0 });
+    expect(h.posted.filter((m) => m.type === "error")).toEqual([expect.objectContaining({ message: "Error: oops", fatal: false })]);
+  });
+
   it("plugins without a pointer hook are unaffected", async () => {
     const h = harness();
     await h.rt.start();

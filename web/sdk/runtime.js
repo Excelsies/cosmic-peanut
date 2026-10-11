@@ -426,7 +426,7 @@ export function createRuntime(deps) {
       case "pointer": {
         const { kind, x, y, dx, dy } = data;
         if (!POINTER_KINDS.has(/** @type {string} */ (kind))) return;
-        if (![x, y, dx, dy].every((v) => typeof v === "number" && Number.isFinite(v))) return;
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
         const p = plugin;
         if (!p?.pointer) return;
         // One reused event object: no per-event allocation on the input path.
@@ -435,7 +435,11 @@ export function createRuntime(deps) {
         pointerEvent.y = /** @type {number} */ (y);
         pointerEvent.dx = /** @type {number} */ (dx);
         pointerEvent.dy = /** @type {number} */ (dy);
-        guard(() => p.pointer?.(pointerEvent));
+        try {
+          p.pointer(pointerEvent);
+        } catch (err) {
+          postError(err, false);
+        }
         return;
       }
       case "dispose":
