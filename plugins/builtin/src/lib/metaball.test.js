@@ -1,6 +1,8 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { blobSdf, boundRadius, bridgeDistance, smin } from "./metaball.js";
+import { blobSdf, boundRadius, bridgeDistance, CAM, smin, TANF, volumeScissor } from "./metaball.js";
+// @ts-expect-error -- a Node builtin (tests run in Node); the web tsconfig has no @types/node.
+import { readFileSync } from "node:fs";
 import { tetraVertices } from "./tetra-motion.js";
 
 describe("smin", () => {
@@ -80,5 +82,66 @@ describe("boundRadius", () => {
       expect(nearest, `${dist} ${rad}`).toBeGreaterThanOrEqual(0);
       expect(nearest, `${dist} ${rad} (not wastefully loose)`).toBeLessThan(0.35);
     }
+  });
+});
+
+describe("volumeScissor", () => {
+  const f = Math.fround;
+  /** common.glsl rayDir + sphereHit at a texel centre, in float32: does the ray enter the sphere? */
+  function hits(/** @type {number} */ i, /** @type {number} */ j, /** @type {number} */ tw, /** @type {number} */ th, /** @type {number} */ cy, /** @type {number} */ R) {
+    const px = f(f(f(i + 0.5) - f(0.5 * tw)) / f(0.5 * th));
+    const py = f(f(f(j + 0.5) - f(0.5 * th)) / f(0.5 * th));
+    const dx = f(px * f(TANF));
+    const dy = f(py * f(TANF));
+    const n = f(Math.sqrt(f(f(f(dx * dx) + f(dy * dy)) + 1)));
+    const [rx, ry, rz] = [f(dx / n), f(dy / n), f(-1 / n)];
+    const [ox, oy, oz] = [0, f(-cy), f(CAM)];
+    const b = f(f(f(ox * rx) + f(oy * ry)) + f(oz * rz));
+    const c = f(f(f(f(ox * ox) + f(oy * oy)) + f(oz * oz)) - f(f(R) * f(R)));
+    const h = f(f(b * b) - c);
+    return h >= 0 && f(-b + f(Math.sqrt(h))) > f(-b - f(Math.sqrt(h)));
+  }
+
+  it("leaves out only canvas pixels that sample nothing, and lets the rest sample only texels it writes", () => {
+    const out = new Int32Array(8);
+    const cases = [
+      [1280, 720, 0.4, 0.3, 1.0],
+      [2560, 1440, 0.6, 0.55, 1.65],
+      [1000, 563, 0.5, 1.2, 1.4], // reaching past the top edge
+      [801, 601, 0.5, -0.4, 0.25],
+      [1920, 1080, 0.5, 0.0, 4.9], // camera nearly inside: whole pass
+    ];
+    for (const [cw, ch, s, cy, R] of cases) {
+      const tw = Math.ceil(cw * s);
+      const th = Math.ceil(ch * s);
+      volumeScissor(cy, R, cw, ch, tw, th, out);
+      const [vx0, vy0, vx1, vy1, cx0, cy0, cx1, cy1] = out;
+      const colHit = new Uint8Array(tw);
+      const rowHit = new Uint8Array(th);
+      for (let j = 0; j < th; j++)
+        for (let i = 0; i < tw; i++)
+          if (hits(i, j, tw, th, cy, R)) colHit[i] = rowHit[j] = 1;
+      expect(colHit.includes(1)).toBe(true);
+      /** For each canvas line along one axis: its two bilinear tap lines, clamped to the texture. */
+      const check = (/** @type {number} */ c, /** @type {number} */ t, /** @type {Uint8Array} */ hit, /** @type {number} */ v0, /** @type {number} */ v1, /** @type {number} */ c0, /** @type {number} */ c1) => {
+        expect(0 <= v0 && v0 <= v1 && v1 <= t && 0 <= c0 && c0 <= c1 && c1 <= c).toBe(true);
+        for (let X = 0; X < c; X++) {
+          const u = ((X + 0.5) * t) / c - 0.5;
+          const i0 = Math.min(t - 1, Math.max(0, Math.floor(u)));
+          const i1 = Math.min(t - 1, Math.max(0, Math.floor(u) + 1));
+          if (X < c0 || X >= c1) expect(hit[i0] || hit[i1]).toBe(0);
+          else expect(i0 >= v0 && i1 < v1).toBe(true);
+        }
+      };
+      check(cw, tw, colHit, vx0, vx1, cx0, cx1);
+      check(ch, th, rowHit, vy0, vy1, cy0, cy1);
+      if (R < 4) expect((cx1 - cx0) * (cy1 - cy0)).toBeLessThan(cw * ch);
+    }
+  });
+
+  it("shares the camera with common.glsl", () => {
+    const src = readFileSync(new URL("../../shaders/tetraballs/common.glsl", import.meta.url), "utf8");
+    expect(Number(src.match(/const float CAM = ([\d.]+);/)?.[1])).toBe(CAM);
+    expect(Number(src.match(/const float TANF = ([\d.]+);/)?.[1])).toBe(TANF);
   });
 });
