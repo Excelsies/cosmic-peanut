@@ -1,5 +1,5 @@
 // @ts-check
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createDrift,
   createIsometry,
@@ -109,6 +109,64 @@ describe("{p,q} tiling fold", () => {
       mobiusApply(g, x, y, out);
       expect(out[0]).toBeCloseTo(f[0], 6);
       expect(out[1]).toBeCloseTo(f[1], 6);
+    }
+  });
+});
+
+describe("fold's mirror test", () => {
+  /** The angle-test fold (two atan2 per round) that hyperbolic.frag used to run. */
+  function foldByAngles(/** @type {number} */ x, /** @type {number} */ y, /** @type {ReturnType<typeof tiling>} */ t) {
+    const a2 = 2 * t.alpha;
+    const r2 = t.r * t.r;
+    let n = 0;
+    for (let i = 0; i < 60; i++) {
+      const k = Math.floor(Math.atan2(y, x) / a2);
+      if (k !== 0) {
+        const c = Math.cos(-k * a2), s = Math.sin(-k * a2);
+        [x, y] = [x * c - y * s, x * s + y * c];
+      }
+      if (Math.atan2(y, x) > t.alpha) {
+        const c = Math.cos(a2), s = Math.sin(a2);
+        [x, y] = [x * c + y * s, x * s - y * c];
+      }
+      const dx = x - t.cx;
+      const d2 = dx * dx + y * y;
+      if (d2 >= r2) break;
+      [x, y] = [t.cx + (r2 * dx) / d2, (r2 * y) / d2];
+      n++;
+    }
+    return [x, y, n];
+  }
+
+  it("is a sign test (one atan2 per round) with exactly the angle test's result, on and off the mirror", () => {
+    const f = new Float64Array(3);
+    const view = createIsometry();
+    const step = createIsometry();
+    for (const [p, q] of [[7, 3], [5, 4], [4, 5]]) {
+      const t = tiling(p, q);
+      for (let i = 0; i < 3000; i++) {
+        let [x, y] = inDisk(0.995);
+        if (i % 3 === 1) {
+          // Just either side of a mirror line (angle α + 2kα).
+          const r = Math.hypot(x, y);
+          const ang = t.alpha * (1 + 2 * Math.floor(rnd() * p)) + (rnd() - 0.5) * 1e-12;
+          [x, y] = [r * Math.cos(ang), r * Math.sin(ang)];
+        } else if (i % 3 === 2) {
+          // Through a drifted view, as the shader sees it.
+          const [tx, ty] = inDisk(0.8);
+          mobiusTranslate(step, tx, ty);
+          mobiusCompose(view, step, view);
+          mobiusApply(view, x, y, out);
+          [x, y] = [out[0], out[1]];
+          if (Math.hypot(x, y) >= 0.9999) continue;
+        }
+        const atan2 = vi.spyOn(Math, "atan2");
+        fold(x, y, t, f);
+        const calls = atan2.mock.calls.length;
+        atan2.mockRestore();
+        expect(calls).toBe(Math.min(f[2] + 1, 60));
+        expect([...f]).toEqual(foldByAngles(x, y, t));
+      }
     }
   });
 });
