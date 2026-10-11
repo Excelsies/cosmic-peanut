@@ -52,11 +52,16 @@ def test_builtin_renderers():
     }
 
 
+# Mesa llvmpipe shades these final passes 1 LSB differently when the target has no depth buffer
+# (depth test off either way), so they keep it until that is shown to be llvmpipe-only.
+KEEP_CANVAS_DEPTH = ["undertow", "blaze", "cascade", "tiedye", "skull", "laminar"]
+
+
 def test_webgl2_visualizers_drop_the_unused_canvas_depth_buffer():
     """None of them depth-tests the default framebuffer (they all disable DEPTH_TEST)."""
     webgl2 = [(repo, v) for repo, v in _entries() if v["renderer"] == "webgl2"]
     assert len(webgl2) == 14
-    assert [v["id"] for _, v in webgl2 if v.get("depth", True)] == []
+    assert [v["id"] for _, v in webgl2 if v.get("depth", True)] == KEEP_CANVAS_DEPTH
 
 
 def test_template_is_one_webgl2_visualizer():

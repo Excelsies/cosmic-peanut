@@ -24,7 +24,6 @@
       "author": "Tidalviz",
       "entry": "src/undertow.js",
       "renderer": "webgl2",
-      "depth": false,
       "libs": [],
       "thumbnail": "thumbs/undertow.jpg",
       "params": [
@@ -91,7 +90,6 @@
       "author": "Tidalviz",
       "entry": "src/blaze.js",
       "renderer": "webgl2",
-      "depth": false,
       "libs": [],
       "thumbnail": "thumbs/blaze.jpg",
       "params": [
@@ -114,7 +112,6 @@
       "author": "Tidalviz",
       "entry": "src/cascade.js",
       "renderer": "webgl2",
-      "depth": false,
       "thumbnail": "thumbs/cascade.jpg",
       "params": [
         { "id": "flow", "type": "number", "label": "Flow", "min": 0.2, "max": 2, "step": 0.01, "default": 1 },
@@ -178,7 +175,6 @@
       "author": "Tidalviz",
       "entry": "src/tiedye.js",
       "renderer": "webgl2",
-      "depth": false,
       "thumbnail": "thumbs/tiedye.jpg",
       "params": [
         { "id": "pattern", "type": "select", "label": "Pattern", "options": ["spiral", "bullseye", "crumple", "shibori"], "default": "spiral" },
@@ -198,7 +194,6 @@
       "author": "Tidalviz",
       "entry": "src/skull.js",
       "renderer": "webgl2",
-      "depth": false,
       "thumbnail": "thumbs/skull.jpg",
       "params": [
         { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
@@ -275,7 +270,6 @@
       "author": "Tidalviz",
       "entry": "src/laminar.js",
       "renderer": "webgl2",
-      "depth": false,
       "thumbnail": "thumbs/laminar.jpg",
       "params": [
         { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.01, "default": 1 },
