@@ -3,6 +3,104 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Performance pass (2026-10-11)
+
+Fork only. Fewer machine resources at the same picture: each change is pixel-identical in the
+render A/B (Playwright WebKit on Mesa llvmpipe, 2560×1440 stills, against the tree before the pass)
+or moves at most 1/255 on a few pixels, as stated. Same Linux machine as above; "audit" marks an
+estimate from the audit, not a measurement here.
+
+**Host**
+- **The control WebSocket declines permessage-deflate.** WebKitGTK offered it and aiohttp
+  accepted, so every 29 KB frame was zlib-compressed in an executor thread (audit: ~2–3 points of
+  host CPU, ~350–450 wakeups/s). Tests and `tools.cpu_budget` now make the same offer, at the real
+  29,024-byte frame size.
+- **Capture: `stdbuf -o0 pw-record --latency 512`.** `pw-record` writes with `fwrite()` to glibc's
+  fully buffered stdout, which is why 512 delivered two blocks at once (above); at 256 every block
+  arrived one 5.3 ms cycle late. Unbuffered, each cycle is one `write()`: half the graph rate forced
+  on every client of the sink (187.5 → 93.75 Hz) and ~5.3 ms less audio-to-screen latency. Without
+  `stdbuf`: 256 and one warning. Emulated with a ctypes `fwrite` writer, not measured live.
+- **Digital silence.** A frame equal to the last one apart from `frameIndex`/`hostTime` goes out
+  at most once a second (`KEEPALIVE_S`): 5 s of synthetic silence, 5 frames for 377 hops.
+  `resume()` forces the next frame out, so a reloaded shell gets one. The analyzer skips window,
+  FFT and sums once the window and the two before it are all zero (bit-identical; ~40 µs/hop at
+  fft 2048, ~45–50 at 4096), and released bands below 1e-9 snap to 0 (exact zeros 6 s in, not
+  2e-44 subnormals).
+- **Analysis allocates nothing per hop** (~10 KB → ~1.1 KB transient; the tracemalloc bound goes
+  from 16 KB to 2 KB). About −15 to −20 µs/hop paced; scalars move ≤ 3.8e-6 (summation order),
+  bands and spectrum are bit-identical.
+- `OPENBLAS_NUM_THREADS` defaults to 1 before numpy loads (`app.py`, `tools/`): 24 → 1 threads
+  (audit: ~1.7 CPU-s per launch). dulwich and urllib3 load on the first git fetch:
+  `tidalviz.plugins.git` import 25.5 → 3.8 ms (audit: ~6–7 MB RSS).
+- Paused, the analysis thread sleeps on an Event: 48 → ≤ 2 voluntary switches over 40 blocks. The
+  demo source renders its 8 s loop once: 78 → 4 µs per block (first loop bit-identical; after it the
+  bass and pad partials restart their phase on the bar line).
+- Dev-folder watcher step 10 → 50 ms, only while a dev folder is registered: idle wakeups ~100/s →
+  20/s; save-to-callback p50 11 / max 19 ms → p50 50 / max 100 ms (budget 300).
+- Static files carry ETag/Last-Modified and answer 304 (`FileResponse`). `/lib/three/<version>/`
+  (now in the import map) and, outside `--dev`, `/sdk` are `immutable`; the rest `no-cache`; dev
+  folders stay `no-store`.
+- `pw-dump` runs off the loop, once per `hello` and `setSource`; the latest `setSource` wins. A
+  saved `app:<pid>` source whose app has quit falls back to system audio with a warning. The hub
+  carries a dropped frame's onset flag onto the frame that replaces it.
+- `tools/thread_profile.py` (Linux): per-thread CPU and wakeups for tidalviz, its WebKit processes,
+  Hyprland and PipeWire, plus main-thread UI runs/s (synthetic 60 Hz / 4 ms load: 60.0 runs/s,
+  p50 4.01 ms). The HUD now says host CPU includes WebKit UI work.
+
+**Shell and SDK**
+- **Throttle click: the shell decides.** Active iframe only, 15–35 fps and
+  < 0.8 × min(60, `fpsCap`), sent as `perf.throttled`; the host clicks only on that. WebKit holds a
+  never-clicked iframe near 20 fps on macOS but ~30 on Linux (Playwright's WebKit: ~31), so the
+  first band, 15–25, never clicked here. Battery's 30 fps cap or a 30 Hz monitor no longer takes the
+  pointer; a plugin GPU-bound below 15 fps is deliberately not clicked.
+- Hidden page: the 10 s ready timeout counts only while visible (fresh 10 s on return); auto-cycle
+  stops. The GTK host sends the monitor's `refreshHz` (macOS: 0, unchanged); under 55 Hz the fps cap
+  follows it. Auto/High send `maxDpr` 0 and the SDK re-sizes on a resolution change. Params go live
+  on input and are saved on change.
+- The HUD renders on data, not at 4 Hz; no devlog DOM outside dev mode; non-fatal plugin errors
+  capped at 5/s per plugin; closed panels render on open; the pointer path allocates nothing.
+- **`depth: false`** (manifest, webgl2/three, default true) on Stargate, Radar, Dark Sun, Eclipse,
+  Marbling, Tetraballs, Cosmic Peanut and the template. Undertow, Blaze, Cascade, Tie-Dye, Skull
+  Trip and Laminar keep the depth buffer: llvmpipe shades their final pass up to 1 LSB differently
+  when the target has no depth attachment, even with the depth test off. VRAM saving not measured.
+
+**Visualizers** (bit-identical unless a delta is given)
+- Orbit, Tentacube: `OutputPass.needsSwap = false`, so the composer never allocates its second
+  full-res HalfFloat target (~44 MB at 1440p); bloom off at Bloom 0; Orbit's ring in one pass and
+  pillar matrices built once. Tentacube draws its background after the creature (early-Z).
+- Blaze: RG16F/R16F sim targets on the half-float path and uniforms set once (238 → 148 GL
+  calls/frame, by the commit). Cascade: R16F mist. Radar: one-channel phosphor (R16F, ~12.6 MB less
+  traffic per frame and VRAM). Laminar: RG16F velocity, 262 → 199 calls/frame. Eclipse: 41 → 36.
+  Cosmic Peanut: 37 → 24.
+- ALU skipped where the result can't change: Eclipse corona trees and cloud mask, Marbling drag
+  cull, Dark Sun range, Tie-Dye knot noise, Skull Trip jaw (exact `min()` bound) and the stripes
+  under the opaque skull, Laminar's reflection outside the ball, Tetraballs' volume pass scissored
+  to the sphere (proven by a float32 brute-force test). Bars and Marbling skip frames that would
+  redraw the same image (Marbling: ~80% of frames in silence); `plugin-api.md` now says an undrawn
+  frame keeps the last image, which the fps cap already relied on.
+- Cosmic Peanut: Fine lines hold a 1×1 soft texture (−14.7 MB at DPR 1); plain Soft lines at 1:1
+  draw straight to the canvas (no 14.7 MB texture, no copy); instanced `LINE_STRIP`s replace the
+  vertex and index buffers (−1 to −1.6 MB). The README gives GPU memory per DPR.
+- ≤ 1/255: Undertow's hue matrix on the CPU (≤ 0.006% of pixels), Stargate `pow` → multiplies
+  (≤ 0.012%), Tie-Dye CPU absorbance (≤ 0.002%), Skull Trip CPU uniforms (≤ 0.014%), Eclipse and
+  Marbling `pow` skips (≤ 6 px), Cosmic Peanut's removed varying (1–2 px).
+- **Tried and dropped (changed pixels):** Blaze analytic curl noise (the sim diverges, 7–21% of
+  pixels); Undertow's atan-free swirl (1/255 on up to 0.73%); Tentacube's fold sign test (1–2
+  mirror-line pixels per still); Pulsar's cached row paths (~128 AA edge pixels); Radar's decay
+  clock (trails up to 5/255 brighter, cause not found); Skull Trip's teeth skip (up to 5/255); the
+  MSAA → canvas resolve in Cosmic Peanut (no safe probe). three 0.186.1 ships no min build, so
+  three.js stays unminified.
+
+**Render A/B of the merged tree** (all 18 visualizers, drums and music, stills 30/90/150): Bars,
+Orbit, Pulsar, Blaze, Cascade, Radar, Tentacube, Dark Sun, Tetraballs, Halo and Cosmic Peanut are
+bit-identical; Laminar shares a bit-identical outcome on every still (RUNS=3). The rest move at
+most 1/255: Undertow ≤ 0.006% of pixels, Stargate ≤ 0.012%, Tie-Dye ≤ 0.002%, Skull Trip ≤ 0.014%,
+Eclipse ≤ 6 px, Marbling 1 px.
+
+Known gap: no live per-process CPU/GPU measurement of the merged app yet; everything above is unit
+tests, emulation and llvmpipe renders, not the RTX 4090 or macOS. Soft lines with antialias at
+DPR 1 (Cosmic Peanut) is still ~44.7 MB, over the PRD's 10 MB.
+
 ## Background and visual opacity (2026-10-02)
 
 Two persisted settings, `backgroundOpacity` (0–1, default 0) and `visualOpacity` (0.1–1, default
