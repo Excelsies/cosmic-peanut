@@ -21,8 +21,9 @@
  *   scalar    advect temperature + fuel, feed fuel from the seed along the bottom, jet heat, burn, cool
  * and composite the temperature through the palette ramp onto the transparent canvas.
  *
- * Sim targets are RGBA16F when the GPU can render to half floats (EXT_color_buffer_float or
- * EXT_color_buffer_half_float). Without either they fall back to RGBA8: velocity is stored
+ * Sim targets are half floats when the GPU can render to them (EXT_color_buffer_float or
+ * EXT_color_buffer_half_float): RG16F for velocity and temperature + fuel, R16F for vorticity,
+ * divergence and pressure. Without either they fall back to RGBA8: velocity is stored
  * offset-encoded (±4 heights/s in 8 bits), temperature clamps at 1 and vorticity confinement is
  * off, so the fire is coarser and calmer but still works.
  */
@@ -86,12 +87,12 @@ export default async function create(ctx) {
   let cur = 0; // scalar ping-pong
   let vcur = 0; // velocity ping-pong
 
-  /** (Re)allocate one target and clear it to `r, g`. @param {{tex: WebGLTexture, fbo: WebGLFramebuffer}} t @param {number} r @param {number} g */
+  /** (Re)allocate one target (`one`: a single channel) and clear it to `r, g`. @param {{tex: WebGLTexture, fbo: WebGLFramebuffer}} t @param {number} r @param {number} g */
   function alloc(t, r, g, one = false) {
     gl.bindTexture(gl.TEXTURE_2D, t.tex);
-    if (one) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, sw, sh, 0, gl.RED, gl.HALF_FLOAT, null);
-    else if (half) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, sw, sh, 0, gl.RGBA, gl.HALF_FLOAT, null);
-    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, sw, sh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    if (!half) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, sw, sh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    else if (one) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, sw, sh, 0, gl.RED, gl.HALF_FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, sw, sh, 0, gl.RG, gl.HALF_FLOAT, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
     gl.clearColor(r, g, 0, 1);
@@ -105,7 +106,7 @@ export default async function create(ctx) {
     sh = s.height;
     for (const t of scal) alloc(t, 0, 0);
     for (const t of vel) alloc(t, VENC_Y, VENC_Y);
-    alloc(curl, 0, 0); // unused without half floats, but kept complete for the sampler
+    alloc(curl, 0, 0, true); // unused without half floats, but kept complete for the sampler
     if (half) for (const t of [div, ...pres]) alloc(t, 0, 0, true);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
