@@ -60,4 +60,46 @@ describe("blaze GL state", () => {
     const e = last(none.frame().draws, "Velocity step");
     for (const t of ["u_vel", "u_scal", "u_curl"]) expect(e.textures[t].format).toBe("RGBA8");
   });
+
+  it("uploads only the sim clock per sim step", async () => {
+    const s = await setup();
+    s.frame();
+    const two = s.frame(1 / 60).uploads.length;
+    const four = s.frame(1 / 30).uploads.length;
+    expect(four - two).toBe(2 * 2); // two extra steps × (velocity + scalar u_time)
+  });
+
+  it("uploads param-dependent uniforms on params(), not per frame", async () => {
+    const s = await setup();
+    s.frame();
+    expect(s.frame().uploads.map((u) => u.name)).not.toContain("u_buoy");
+    s.params.feed = "waveform";
+    s.viz.params?.({ feed: "waveform" });
+    const { draws } = s.frame();
+    expect(last(draws, "Velocity step").uniforms.u_buoy).toEqual([3]);
+    expect(last(draws, "Velocity step").uniforms.u_rise).toEqual([0]);
+    expect(last(draws, "Scalar step").uniforms.u_rise).toEqual([0]);
+  });
+
+  it("follows live reduceMotion every frame", async () => {
+    const s = await setup();
+    const before = last(s.frame().draws, "Velocity step").uniforms;
+    s.state.reduceMotion = true;
+    const after = last(s.frame().draws, "Velocity step").uniforms;
+    expect(after.u_turb[0]).toBeLessThan(before.u_turb[0]);
+    expect(after.u_dt[0]).toBeLessThan(before.u_dt[0]);
+  });
+
+  it("re-sends size-dependent uniforms after a resize", async () => {
+    const s = await setup();
+    s.frame();
+    s.size.width = 1280;
+    s.size.height = 720;
+    s.viz.resize?.(s.size);
+    const { draws } = s.frame();
+    const v = last(draws, "Velocity step").uniforms;
+    const sh = Math.round(720 * Number(DEFAULTS.detail));
+    expect(v.u_texelH[0]).toBeCloseTo(1 / sh, 9);
+    expect(last(draws, "Scalar step").uniforms.u_texel[1]).toBeCloseTo(1 / sh, 9);
+  });
 });
