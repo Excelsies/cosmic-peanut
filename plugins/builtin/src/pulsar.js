@@ -6,7 +6,7 @@
  * middle) under a central envelope, roughened by the waveform. New ridges enter at the front
  * (bottom) at a fixed rate and recede upward. Hidden lines are removed by erasing under each
  * ridge (destination-out) before stroking it, back to front, so the canvas stays transparent
- * wherever nothing is drawn. Only each new ridge's two paths are allocated, as it arrives.
+ * wherever nothing is drawn. Nothing is allocated per frame.
  */
 import {
   advanceScroll,
@@ -19,7 +19,6 @@ import {
   ridgeLayout,
   resizeRing,
   ringPush,
-  rowPaths,
   stepGain,
 } from "./lib/ridges.js";
 
@@ -45,8 +44,6 @@ export default function create(ctx) {
   const gainState = { level: 0.5 };
   let gain = 1;
   let seq = 0;
-  /** @type {ReturnType<typeof rowPaths>[]} */
-  let paths = [];
 
   function lineCount() {
     return Number(ctx.params.lines) || 80;
@@ -59,7 +56,6 @@ export default function create(ctx) {
     lineWidth = Number(ctx.params.lineWidth) * dpr;
     const c = ctx.params.color;
     color = typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c) ? c : "#ffffff";
-    paths = Array.from({ length: ring.lines }, (_, r) => rowPaths(ring.data, r * POINTS, idx, POINTS, lay, lineWidth));
   }
   relayout();
 
@@ -69,15 +65,13 @@ export default function create(ctx) {
       if (ctx.reduceMotion && rate === DEFAULT_SPEED) rate = REDUCED_SPEED;
       const n = advanceScroll(scroll, time.dt, rate, ring.lines);
       for (let k = 0; k < n; k++) {
-        const o = ringPush(ring);
-        const raw = buildLine(ring.data, o, env, audio.bands, audio.waveform, gain, ++seq);
-        paths[ring.head] = rowPaths(ring.data, o, idx, POINTS, lay, lineWidth);
+        const raw = buildLine(ring.data, ringPush(ring), env, audio.bands, audio.waveform, gain, ++seq);
         gain = stepGain(gainState, raw, 1 / rate);
       }
 
       const { width: w, height: h } = ctx.size;
       g.clearRect(0, 0, w, h);
-      drawRidges(g, ring, paths, lay, scroll.frac, color, lineWidth, h);
+      drawRidges(g, ring, idx, lay, scroll.frac, color, lineWidth, h);
     },
 
     resize() {

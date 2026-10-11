@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * Ridge-line math for Pulsar (the Unknown Pleasures plot). Pure functions over preallocated
- * typed arrays; only {@link rowPaths} allocates, once per ridge as it arrives.
+ * typed arrays; nothing here allocates after setup.
  */
 
 /** Half-width of the central eruption, as a fraction of the line (the cover's is ≈ 0.2–0.25). */
@@ -237,43 +237,8 @@ export function ridgeLayout(w, h, lines, height, out) {
 }
 
 /**
- * One row's paths in row-local coordinates (its baseline at y = 0), for {@link drawRidges}: the
- * curve, and the curve closed down past the next baseline to erase with. Built when the row
- * arrives or the layout changes, never per frame.
- * @param {Float32Array} data
- * @param {number} o row offset
- * @param {Int16Array} idx which points to draw, ascending (see {@link drawOrder})
- * @param {number} points points per row
- * @param {{ left: number, width: number, spacing: number, amp: number }} lay
- * @param {number} lineWidth pixels
- */
-export function rowPaths(data, o, idx, points, lay, lineWidth) {
-  const { left, spacing, amp } = lay;
-  const dx = lay.width / (points - 1);
-  const curve = new Path2D();
-  curve.moveTo(left + idx[0] * dx, -data[o + idx[0]] * amp);
-  for (let k = 1; k < idx.length; k++) {
-    const i = idx[k];
-    curve.lineTo(left + i * dx, -data[o + i] * amp);
-  }
-  // Erase depth below a line's own baseline: past the next baseline by a spacing, so the next
-  // line's erase covers this line's bottom edge (ridges dip at most a wiggle below baseline).
-  const floor = 2 * spacing + lineWidth;
-  const out = lineWidth + 2;
-  const right = left + lay.width;
-  const closed = new Path2D(curve);
-  closed.lineTo(right + out, -data[o + points - 1] * amp);
-  closed.lineTo(right + out, floor);
-  closed.lineTo(left - out, floor);
-  closed.lineTo(left - out, -data[o] * amp);
-  closed.closePath();
-  return { curve, closed };
-}
-
-/**
  * Draw the history with hidden-line removal on a transparent canvas: back to front, each line
  * first erases what lies behind it (destination-out fill under its curve), then strokes itself.
- * Each row's paths (see {@link rowPaths}) are drawn translated to its baseline.
  *
  * To halve the path work, a back line strokes the same closed path it erased with. Its closing
  * edges stay invisible: the sides run outside the plot (clipped away) and the bottom edge lies
@@ -281,33 +246,70 @@ export function rowPaths(data, o, idx, points, lay, lineWidth) {
  * front lines (the newest fades in, so its erase is partial) stroke just their curve.
  * @param {CanvasRenderingContext2D} g
  * @param {ReturnType<typeof createRing>} ring
- * @param {ReturnType<typeof rowPaths>[]} paths one per ring row, in ring order
- * @param {{ left: number, width: number, bottom: number, spacing: number }} lay
+ * @param {Int16Array} idx which points to draw, ascending (see {@link drawOrder})
+ * @param {{ left: number, width: number, bottom: number, spacing: number, amp: number }} lay
  * @param {number} frac scroll fraction 0–1 from {@link advanceScroll}
  * @param {string} color stroke color
  * @param {number} lineWidth pixels
  * @param {number} h canvas height, pixels
  */
-export function drawRidges(g, ring, paths, lay, frac, color, lineWidth, h) {
-  const { head, lines } = ring;
+export function drawRidges(g, ring, idx, lay, frac, color, lineWidth, h) {
+  const { data, points, lines } = ring;
+  const { left, spacing, amp } = lay;
+  const dx = lay.width / (points - 1);
+  const right = left + lay.width;
+  // Erase depth below a line's own baseline: past the next baseline by a spacing, so the next
+  // line's erase covers this line's bottom edge (ridges dip at most a wiggle below baseline).
+  const depth = 2 * spacing + lineWidth;
+  const out = lineWidth + 2;
   g.save();
   g.beginPath();
-  g.rect(lay.left, 0, lay.width, h);
+  g.rect(left, 0, lay.width, h);
   g.clip();
   g.strokeStyle = color;
   g.lineWidth = lineWidth;
   g.lineJoin = "round";
   for (let age = lines - 1; age >= 0; age--) {
-    const p = paths[(head - age + lines) % lines];
-    g.setTransform(1, 0, 0, 1, 0, lay.bottom - (age + frac) * lay.spacing);
+    const o = ringRow(ring, age);
+    const base = lay.bottom - (age + frac) * spacing;
     // The oldest line fades out as it leaves, the newest fades in as it arrives: no popping.
     g.globalAlpha = age === lines - 1 ? 1 - frac : age === 0 ? frac : 1;
+
+    tracePoints(g, data, o, idx, left, dx, base, amp);
+    const floor = base + depth;
+    g.lineTo(right + out, base - data[o + points - 1] * amp);
+    g.lineTo(right + out, floor);
+    g.lineTo(left - out, floor);
+    g.lineTo(left - out, base - data[o] * amp);
+    g.closePath();
     g.globalCompositeOperation = "destination-out";
-    g.fill(p.closed);
+    g.fill();
+
     g.globalCompositeOperation = "source-over";
-    g.stroke(age < 2 ? p.curve : p.closed);
+    if (age < 2) tracePoints(g, data, o, idx, left, dx, base, amp);
+    g.stroke();
   }
   g.restore();
+}
+
+/**
+ * Begin a path along one row's curve.
+ * @param {CanvasRenderingContext2D} g
+ * @param {Float32Array} data
+ * @param {number} o row offset
+ * @param {Int16Array} idx
+ * @param {number} left
+ * @param {number} dx
+ * @param {number} base baseline y
+ * @param {number} amp
+ */
+function tracePoints(g, data, o, idx, left, dx, base, amp) {
+  g.beginPath();
+  g.moveTo(left + idx[0] * dx, base - data[o + idx[0]] * amp);
+  for (let k = 1; k < idx.length; k++) {
+    const i = idx[k];
+    g.lineTo(left + i * dx, base - data[o + i] * amp);
+  }
 }
 
 /**
