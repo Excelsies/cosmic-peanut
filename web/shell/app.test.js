@@ -63,7 +63,7 @@ function setup() {
   const { host, create } = fakeHost();
   /** @type {any[]} */
   const sent = [];
-  const app = createApp({ root, send: (m) => (sent.push(m), true), createPluginHost: create, dpr: 2 });
+  const app = createApp({ root, send: (m) => (sent.push(m), true), createPluginHost: create });
   /** @param {string} key @param {Partial<KeyboardEventInit>} [o] */
   const press = (key, o = {}) => document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...o }));
   const last = (/** @type {string} */ type) => sent.filter((m) => m.type === type).at(-1);
@@ -75,12 +75,26 @@ afterEach(() => vi.useRealTimers());
 
 describe("app: hello and selection", () => {
   it("hello renders the library and shows the active visualizer with its stored values", () => {
-    const { app, root, host } = setup();
+    const { app, root, host, press } = setup();
     app.handle(hello());
+    press("l");
     expect(root.querySelectorAll("#library .card")).toHaveLength(3);
     expect(host.show).toHaveBeenCalledWith(A, { hue: 120 });
     expect(root.querySelector(".now-name")?.textContent).toBe("Bars");
-    expect(host.deps.settings).toMatchObject({ quality: "auto", maxDpr: 2, fpsCap: 0, reduceFlashing: true });
+    expect(host.deps.settings).toMatchObject({ quality: "auto", maxDpr: 0, fpsCap: 0, reduceFlashing: true });
+  });
+
+  it("caps fps at a slow display's refresh rate, following the window across monitors", () => {
+    const { app, host } = setup();
+    app.handle(hello({ refreshHz: 30 }));
+    expect(host.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ quality: "auto", fpsCap: 30 }));
+    app.handle({ type: "display", refreshHz: 59.95 });
+    expect(host.setSettings).toHaveBeenLastCalledWith({ fpsCap: 0 });
+    app.handle({ type: "display", refreshHz: 30 });
+    expect(host.setSettings).toHaveBeenLastCalledWith({ fpsCap: 30 });
+    host.setSettings.mockClear();
+    app.handle({ type: "display", refreshHz: 30 });
+    expect(host.setSettings).not.toHaveBeenCalled();
   });
 
   it("with no active visualizer picks the first enabled one and persists it", () => {
@@ -91,23 +105,28 @@ describe("app: hello and selection", () => {
   });
 
   it("clicking a library card selects it and sends select", () => {
-    const { app, root, host, last } = setup();
+    const { app, root, host, last, press } = setup();
     app.handle(hello());
+    press("l");
     const cards = root.querySelectorAll("#library .card button.card-main");
     /** @type {HTMLButtonElement} */ (cards[1]).click();
     expect(host.show).toHaveBeenLastCalledWith(B, {});
     expect(last("select")).toEqual({ type: "select", key: "builtin/orb" });
   });
 
-  it("params panel sends full values and forwards changes to the plugin", () => {
+  it("params panel forwards changes to the plugin live and saves full values on change", () => {
     const { app, root, host, last } = setup();
     app.handle(hello());
+    /** @type {HTMLButtonElement} */ (root.querySelector('button[title="Parameters"]')).click();
     const hue = /** @type {HTMLInputElement} */ (root.querySelector("#param-hue"));
     expect(hue.value).toBe("120");
     hue.value = "300";
     hue.dispatchEvent(new Event("input"));
-    expect(last("params")).toEqual({ type: "params", key: "builtin/bars", values: { hue: 300 } });
     expect(host.setParams).toHaveBeenLastCalledWith({ hue: 300 });
+    expect(last("params")).toBeUndefined(); // each params message rewrites settings.json
+    hue.dispatchEvent(new Event("change"));
+    expect(last("params")).toEqual({ type: "params", key: "builtin/bars", values: { hue: 300 } });
+    expect(host.setParams).toHaveBeenCalledTimes(1);
     // switching away and back keeps the value
     app.select("builtin/orb");
     app.select("builtin/bars");
@@ -124,8 +143,9 @@ describe("app: hello and selection", () => {
   });
 
   it("visualizers update refreshes the library; removal of the active one falls back", () => {
-    const { app, root, host } = setup();
+    const { app, root, host, press } = setup();
     app.handle(hello());
+    press("l");
     app.handle({ type: "visualizers", visualizers: [B, C], repos: [] });
     expect(root.querySelectorAll("#library .card")).toHaveLength(2);
     expect(host.show).toHaveBeenLastCalledWith(B, {});
@@ -160,6 +180,22 @@ describe("app: keys", () => {
       { type: "window", action: "fullscreen" },
       { type: "window", action: "floatOnTop" },
     ]);
+  });
+
+  it("closed panels aren't rebuilt on a switch; they render when opened", () => {
+    const { app, root, press } = setup();
+    app.handle(hello());
+    expect(root.querySelectorAll("#library .card")).toHaveLength(0);
+    expect(root.querySelector("#param-hue")).toBeNull();
+    press("l");
+    const card = root.querySelector("#library .card");
+    expect(root.querySelectorAll("#library .card")).toHaveLength(3);
+    press("Escape");
+    app.select("builtin/orb");
+    expect(card?.isConnected).toBe(true); // not rebuilt while closed
+    press("l");
+    expect(card?.isConnected).toBe(false);
+    expect(root.querySelector('#library .card[aria-current="true"]')?.textContent).toContain("Orb");
   });
 
   it("L toggles the library, Esc closes panels", () => {
@@ -256,8 +292,8 @@ describe("app: plugin events", () => {
   it("perf goes to the host with shell time, and onsetSeen is forwarded", () => {
     const { app, host, last } = setup();
     app.handle(hello());
-    host.emit({ kind: "perf", key: "builtin/bars", perf: { fps: 60, frameMsP50: 3, frameMsP99: 7, pluginMsP50: 1, renderScale: 1, dropped: 0 } });
-    expect(last("perf")).toEqual({ type: "perf", key: "builtin/bars", fps: 60, frameMsP50: 3, frameMsP99: 7, pluginMsP50: 1, shellMs: 0.05, renderScale: 1, dropped: 0 });
+    host.emit({ kind: "perf", key: "builtin/bars", perf: { fps: 20, frameMsP50: 3, frameMsP99: 7, pluginMsP50: 1, renderScale: 1, dropped: 0 }, throttled: true });
+    expect(last("perf")).toEqual({ type: "perf", key: "builtin/bars", fps: 20, frameMsP50: 3, frameMsP99: 7, pluginMsP50: 1, shellMs: 0.05, renderScale: 1, dropped: 0, throttled: true });
     host.emit({ kind: "onsetSeen", key: "builtin/bars", frameIndex: 42 });
     expect(last("onsetSeen")).toEqual({ type: "onsetSeen", frameIndex: 42 });
   });
@@ -269,6 +305,35 @@ describe("app: plugin events", () => {
     const log = /** @type {HTMLElement} */ (root.querySelector("#devlog"));
     expect(log.textContent).toContain("<img src=x>");
     expect(log.querySelector("img")).toBeNull();
+  });
+});
+
+describe("app: chatty plugins", () => {
+  it("outside dev mode log lines stay out of the DOM until dev mode turns on", () => {
+    const { app, root, host } = setup();
+    app.handle(hello({ dev: false }));
+    host.emit({ kind: "log", key: "builtin/bars", text: "early" });
+    const log = /** @type {HTMLElement} */ (root.querySelector("#devlog"));
+    expect(log.childNodes).toHaveLength(0);
+    app.handle(hello({ dev: true }));
+    expect(log.textContent).toBe("[builtin/bars] early\n");
+  });
+
+  it("non-fatal errors are reported at most 5 times a second; fatal ones always", () => {
+    const { app, root, host, sent } = setup();
+    app.handle(hello());
+    const errors = () => sent.filter((m) => m.type === "pluginError");
+    for (let i = 0; i < 20; i++) {
+      host.emit({ kind: "error", key: "builtin/bars", error: { type: "error", message: `e${i}`, fatal: false }, reload: false });
+    }
+    expect(errors()).toHaveLength(5);
+    expect(root.querySelector("#error")?.textContent).toContain("e4");
+    host.emit({ kind: "fatal", key: "builtin/bars", error: { type: "error", message: "dead", fatal: true }, wasActive: false });
+    expect(errors().at(-1)).toMatchObject({ message: "dead", fatal: true });
+    vi.advanceTimersByTime(1000);
+    host.emit({ kind: "error", key: "builtin/bars", error: { type: "error", message: "later", fatal: false }, reload: false });
+    expect(errors().at(-1)).toMatchObject({ message: "later" });
+    expect(root.querySelector("#devlog")?.textContent).toContain("15 more plugin errors not shown");
   });
 });
 
@@ -326,8 +391,9 @@ describe("app: host messages", () => {
   });
 
   it("disabled marks the visualizer and falls back if it was active", () => {
-    const { app, root, host } = setup();
+    const { app, root, host, press } = setup();
     app.handle(hello());
+    press("l");
     app.handle({ type: "disabled", key: "builtin/bars", reason: "It stopped responding" });
     expect(host.show).toHaveBeenLastCalledWith(B, {});
     expect(root.querySelector("#status")?.textContent).toContain("It stopped responding");
@@ -335,8 +401,9 @@ describe("app: host messages", () => {
   });
 
   it("library actions send install/addFolder/enable", () => {
-    const { app, root, last } = setup();
+    const { app, root, last, press } = setup();
     app.handle(hello());
+    press("l");
     /** @type {HTMLButtonElement} */ (root.querySelector("button.add-folder")).click();
     expect(last("addFolder")).toEqual({ type: "addFolder" });
   });
@@ -386,6 +453,29 @@ describe("app: settings", () => {
     expect(host.show).toHaveBeenLastCalledWith(B, {});
     vi.advanceTimersByTime(30_000);
     expect(host.show).toHaveBeenLastCalledWith(C, {});
+  });
+
+  it("auto-cycle pauses while the window is hidden", () => {
+    const { app, host } = setup();
+    app.handle(hello({ settings: { photosensitivityNoticeSeen: true, autoCycleSeconds: 30 } }));
+    const hidden = (/** @type {boolean} */ h) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (h ? "hidden" : "visible") });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      vi.advanceTimersByTime(20_000);
+      hidden(true);
+      host.show.mockClear();
+      vi.advanceTimersByTime(120_000);
+      expect(host.show).not.toHaveBeenCalled();
+      hidden(false); // a fresh interval
+      vi.advanceTimersByTime(29_000);
+      expect(host.show).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1_000);
+      expect(host.show).toHaveBeenLastCalledWith(B, {});
+    } finally {
+      hidden(false);
+    }
   });
 
   it("visibility changes are forwarded to plugins", () => {

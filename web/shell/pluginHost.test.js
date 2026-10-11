@@ -25,7 +25,8 @@ class FakePort {
 
 /** @typedef {{ iframe: HTMLIFrameElement; win: { postMessage: ReturnType<typeof vi.fn> }; port1: FakePort; port2: FakePort }} Made */
 
-function setup() {
+/** @param {{ visible?: () => boolean }} [opts] */
+function setup({ visible = () => true } = {}) {
   document.body.innerHTML = '<div id="stage"></div>';
   const container = /** @type {HTMLElement} */ (document.getElementById("stage"));
   /** @type {Made[]} */
@@ -49,7 +50,7 @@ function setup() {
     },
     onEvent: (e) => events.push(e),
     settings: { quality: "auto", maxDpr: 2, fpsCap: 0, renderScaleMax: 1, reduceFlashing: true },
-    visible: () => true,
+    visible,
   });
   /** load iframe i and return its shell-side port */
   const load = (/** @type {number} */ i) => {
@@ -129,6 +130,7 @@ describe("pluginHost", () => {
     port.emit(new ArrayBuffer(3));
     expect(events.map((e) => e.kind)).toEqual(["ready", "perf", "onsetSeen", "log", "contextLost"]);
     expect(events[1].perf.fps).toBe(60);
+    expect(events[1].throttled).toBe(false);
     expect(events[2]).toEqual({ kind: "onsetSeen", key: "r/a", frameIndex: 7 });
     expect(events[3].text).toBe("<b>hi</b>");
   });
@@ -215,6 +217,26 @@ describe("pluginHost", () => {
     expect(events[events.length - 1]).toMatchObject({ kind: "fatal", key: "r/b", wasActive: false });
   });
 
+  it("the ready timeout counts only while visible (a hidden SDK never renders)", () => {
+    let visible = false;
+    const { host, events, load } = setup({ visible: () => visible });
+    host.show(vizA, {});
+    load(0);
+    vi.advanceTimersByTime(60_000);
+    expect(events).toEqual([]);
+    visible = true;
+    host.setVisible(true);
+    vi.advanceTimersByTime(9_000);
+    visible = false;
+    host.setVisible(false); // hidden again: paused
+    vi.advanceTimersByTime(60_000);
+    expect(events).toEqual([]);
+    visible = true;
+    host.setVisible(true);
+    vi.advanceTimersByTime(10_000);
+    expect(events.at(-1)).toMatchObject({ kind: "fatal", key: "r/a", wasActive: true });
+  });
+
   it("hot reload loads hidden, swaps instantly on ready, and keeps params", () => {
     const { host, made, load } = setup();
     host.show(vizA, { hue: 1 });
@@ -279,6 +301,34 @@ describe("pluginHost", () => {
     expect(made[0].iframe.style.pointerEvents).toBe("auto");
     perf(60);
     expect(made[0].iframe.style.pointerEvents).toBe("");
+  });
+
+  it("judges the throttle against the fps cap, not a fixed rate", () => {
+    const { host, load, made, events } = setup();
+    host.show(vizA, {});
+    const pa = load(0);
+    pa.emit({ type: "ready" });
+    const perf = (/** @type {number} */ fps) =>
+      pa.emit({ type: "perf", fps, frameMsP50: 2, frameMsP99: 5, pluginMsP50: 1, renderScale: 1, dropped: 0 });
+    const throttled = () => events.filter((e) => e.kind === "perf").at(-1).throttled;
+    perf(35); // a heavy plugin, uncapped: slow, not throttled
+    expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["", false]);
+    perf(10); // too slow for the ~20 fps throttle: a click wouldn't help
+    expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["", false]);
+    host.setSettings({ fpsCap: 30 }); // Battery
+    perf(30);
+    expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["", false]);
+    perf(20); // still caught under the cap
+    expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["auto", true]);
+  });
+
+  it("reports a throttle for the active iframe only", () => {
+    const { host, load, events } = setup();
+    host.show(vizA, {});
+    load(0).emit({ type: "ready" });
+    host.show(vizB, {});
+    load(1).emit({ type: "perf", fps: 20, frameMsP50: 2, frameMsP99: 5, pluginMsP50: 1, renderScale: 1, dropped: 0 });
+    expect(events.at(-1)).toMatchObject({ kind: "perf", key: "r/b", throttled: false });
   });
 
   it("forwards pointer input to the active plugin only", () => {

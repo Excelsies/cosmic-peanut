@@ -27,11 +27,12 @@ import { VISUAL_OPACITY_MIN } from "./validate.js";
  * @property {HTMLElement} root
  * @property {(msg: object) => boolean} send
  * @property {(deps: import("./pluginHost.js").PluginHostDeps) => PluginHost} [createPluginHost]
- * @property {number} [dpr]
  */
 
 const IDLE_MS = 3000;
 const LOG_LINES = 200;
+// A plugin failing every other frame never reaches the SDK's 3-in-a-row fatal limit.
+const ERRORS_PER_S = 5;
 const AUTO_CYCLE_CHOICES = [0, 15, 30, 60, 120, 300];
 const QUALITY_LABELS = /** @type {const} */ ([
   ["auto", "Auto"],
@@ -48,7 +49,6 @@ const cycleLabel = (s) => (s === 0 ? "Off" : s < 60 ? `Every ${s} s` : `Every ${
 export function createApp(deps) {
   const { root, send } = deps;
   const doc = root.ownerDocument;
-  const dpr = deps.dpr ?? 1;
 
   // ---- state -------------------------------------------------------------------------------
   /** @type {VizInfo[]} */ let visualizers = [];
@@ -72,6 +72,7 @@ export function createApp(deps) {
     root.style.setProperty("--visual-opacity", String(settings.transparent ? settings.visualOpacity : 1));
   };
   let dev = false;
+  let refreshHz = 0; // the window's monitor; 0 = unknown
   let overlaysHidden = false;
   /** @type {PanelName | null} */ let openPanel = null;
   /** @type {Element | null} */ let returnFocus = null;
@@ -225,7 +226,7 @@ export function createApp(deps) {
   // ---- plugin host ---------------------------------------------------------------------------
   const pluginHost = (deps.createPluginHost ?? createPluginHost)({
     container: vizLayer,
-    settings: { quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, dpr) },
+    settings: { quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, refreshHz) },
     visible: () => doc.visibilityState !== "hidden",
     onEvent,
   });
@@ -272,8 +273,18 @@ export function createApp(deps) {
     connectionMessage = false;
   }
 
+  /** Outside dev mode the console is never shown: lines stay strings until it is. @type {string[]} */
+  const logLines = [];
+  let errorsAt = -Infinity;
+  let errorsShown = 0;
+  let errorsDropped = 0;
+
   /** @param {string} line */
   function log(line) {
+    if (!dev) {
+      if (logLines.push(line) > LOG_LINES) logLines.shift();
+      return;
+    }
     devlog.append(line + "\n");
     while (devlog.childNodes.length > LOG_LINES) devlog.firstChild?.remove();
     devlog.scrollTop = devlog.scrollHeight;
@@ -294,7 +305,13 @@ export function createApp(deps) {
     }
   }
 
+  // Closed panels aren't rebuilt (each switch would rebuild every card); they render on open.
+  let libStale = true;
+  let paramsStale = true;
+
   function renderLib() {
+    libStale = openPanel !== "library";
+    if (libStale) return;
     renderLibrary(libraryBody, { visualizers, repos, active: selected, updates }, {
       select: (key) => {
         select(key);
@@ -313,16 +330,24 @@ export function createApp(deps) {
   }
 
   function renderParamsPanel() {
+    paramsStale = openPanel !== "params";
+    if (paramsStale) return;
     const v = selected ? find(selected) : undefined;
     if (!v) {
       paramsBody.replaceChildren(h("p", { class: "muted" }, "No visualizer selected."));
       return;
     }
-    renderParams(paramsBody, v.params, valuesFor(v), (all, changed) => {
-      values.set(v.key, all);
-      send({ type: "params", key: v.key, values: all });
-      if (pluginHost.activeKey === v.key || pluginHost.pendingKey === v.key) pluginHost.setParams(changed);
-    });
+    // Live to the plugin on input, saved on change: each params message rewrites the file.
+    renderParams(
+      paramsBody,
+      v.params,
+      valuesFor(v),
+      (all, changed) => {
+        values.set(v.key, all);
+        if (pluginHost.activeKey === v.key || pluginHost.pendingKey === v.key) pluginHost.setParams(changed);
+      },
+      (all) => send({ type: "params", key: v.key, values: all }),
+    );
   }
 
   function renderSources() {
@@ -403,13 +428,16 @@ export function createApp(deps) {
   function setQuality(q) {
     settings.quality = q;
     send({ type: "settings", quality: q });
-    pluginHost.setSettings({ quality: q, ...qualityProfile(q, dpr) });
+    pluginHost.setSettings({ quality: q, ...qualityProfile(q, refreshHz) });
   }
 
+  /** Not while hidden: a hidden visualizer never gets ready, so each step would fail. */
   function armCycle() {
     clearInterval(cycleTimer);
     cycleTimer = undefined;
-    if (settings.autoCycleSeconds > 0) cycleTimer = setInterval(() => step(1), settings.autoCycleSeconds * 1000);
+    if (settings.autoCycleSeconds > 0 && doc.visibilityState !== "hidden") {
+      cycleTimer = setInterval(() => step(1), settings.autoCycleSeconds * 1000);
+    }
   }
 
   // ---- selection -----------------------------------------------------------------------------
@@ -463,6 +491,21 @@ export function createApp(deps) {
     }
   }
 
+  function errorAllowed() {
+    const now = Date.now();
+    if (now - errorsAt >= 1000) {
+      if (errorsDropped > 0) log(`${errorsDropped} more plugin errors not shown`);
+      errorsAt = now;
+      errorsShown = errorsDropped = 0;
+    }
+    if (errorsShown < ERRORS_PER_S) {
+      errorsShown++;
+      return true;
+    }
+    errorsDropped++;
+    return false;
+  }
+
   // ---- plugin events -------------------------------------------------------------------------
   /** @param {PluginEvent} e */
   function onEvent(e) {
@@ -472,6 +515,7 @@ export function createApp(deps) {
         break;
       case "error":
       case "fatal": {
+        if (e.kind === "error" && !errorAllowed()) break;
         const { type: _t, ...err } = e.error;
         send({ type: "pluginError", key: e.key, ...err });
         const name = find(e.key)?.name ?? e.key;
@@ -506,6 +550,7 @@ export function createApp(deps) {
           shellMs: shell.p50,
           renderScale: p.renderScale,
           dropped: p.dropped,
+          throttled: e.throttled,
         });
         break;
       }
@@ -533,6 +578,8 @@ export function createApp(deps) {
     if (!openPanel) returnFocus = doc.activeElement;
     for (const [n, el] of Object.entries(panels)) el.hidden = n !== name;
     openPanel = name;
+    if (name === "library" && libStale) renderLib();
+    if (name === "params" && paramsStale) renderParamsPanel();
     root.classList.add("panel-open");
     idle.poke();
     const target = /** @type {HTMLElement | null} */ (panels[name].querySelector("input, select, button:not(.close)") ?? panels[name].querySelector("button"));
@@ -632,6 +679,7 @@ export function createApp(deps) {
   doc.addEventListener("visibilitychange", () => {
     const visible = doc.visibilityState !== "hidden";
     pluginHost.setVisible(visible);
+    armCycle();
     // Hidden pages' timers are throttled past the hang threshold: the host pauses its watchdog.
     send({ type: "visibility", visible });
   });
@@ -661,9 +709,11 @@ export function createApp(deps) {
         sources = msg.sources;
         activeSource = msg.activeSource;
         dev = msg.dev;
+        if (dev) for (const line of logLines.splice(0)) log(line);
+        refreshHz = msg.refreshHz;
         for (const v of visualizers) if (!values.has(v.key)) values.set(v.key, v.values);
         Object.assign(settings, msg.settings);
-        pluginHost.setSettings({ quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, dpr) });
+        pluginHost.setSettings({ quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, refreshHz) });
         hud.setVisible(settings.hudVisible);
         applyTransparent();
         applyOpacity();
@@ -748,6 +798,13 @@ export function createApp(deps) {
         setStatus("warn", `${name} was disabled: ${msg.reason}`);
         if (msg.key === selected) fallback(msg.key);
         else renderLib();
+        break;
+      }
+      case "display": {
+        const before = qualityProfile(settings.quality, refreshHz).fpsCap;
+        refreshHz = msg.refreshHz;
+        const fpsCap = qualityProfile(settings.quality, refreshHz).fpsCap;
+        if (fpsCap !== before) pluginHost.setSettings({ fpsCap });
         break;
       }
     }

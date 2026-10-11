@@ -333,6 +333,17 @@ describe("runtime sizing and quality", () => {
     expect([h.canvas.width, h.canvas.height]).toEqual([800, 600]);
   });
 
+  it("re-sizes when the device pixel ratio changes (window moved to another monitor)", async () => {
+    const plugin = { frame: vi.fn(), resize: vi.fn() };
+    const o = { plugin, dpr: 1 };
+    const h = harness(o);
+    await h.rt.start();
+    o.dpr = 2;
+    h.rt.dprChanged();
+    expect(plugin.resize).toHaveBeenCalledTimes(1);
+    expect([h.canvas.width, h.canvas.height]).toEqual([1600, 1200]);
+  });
+
   it("setCssSize updates ctx.size before resize, and skips no-op resizes", async () => {
     const plugin = { frame: vi.fn(), resize: vi.fn() };
     const h = harness({ plugin, dpr: 1 });
@@ -593,6 +604,20 @@ describe("reduced motion and pointer input", () => {
     h.rt.handleMessage({ type: "pointer", kind: "up", x: "15", y: 18, dx: 0, dy: 0 });
     expect(pointer).toHaveBeenCalledTimes(2);
     expect(pointer.mock.calls[1][0]).toMatchObject({ kind: "move", x: 15, y: 18, dx: 5, dy: -2 });
+  });
+
+  it("rejects a non-finite coordinate in any field and reports a throwing pointer hook", async () => {
+    const pointer = vi.fn(() => {
+      throw new Error("oops");
+    });
+    const h = harness({ plugin: { frame: vi.fn(), pointer } });
+    await h.rt.start();
+    for (const bad of [{ x: NaN }, { y: Infinity }, { dx: null }, { dy: undefined }]) {
+      h.rt.handleMessage({ type: "pointer", kind: "move", x: 1, y: 1, dx: 0, dy: 0, ...bad });
+    }
+    expect(pointer).not.toHaveBeenCalled();
+    h.rt.handleMessage({ type: "pointer", kind: "move", x: 1, y: 1, dx: 0, dy: 0 });
+    expect(h.posted.filter((m) => m.type === "error")).toEqual([expect.objectContaining({ message: "Error: oops", fatal: false })]);
   });
 
   it("plugins without a pointer hook are unaffected", async () => {

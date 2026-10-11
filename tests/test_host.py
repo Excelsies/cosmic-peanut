@@ -21,6 +21,10 @@ BUILTINS = [REPO / "plugins" / "builtin", REPO / "plugins" / "template"]
 class FakeWindow:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.hz = 60.0
+
+    def refresh_hz(self) -> float:
+        return self.hz
 
     def fullscreen(self) -> None:
         self.calls.append("fullscreen")
@@ -156,7 +160,17 @@ async def test_frames_stream_while_a_shell_is_connected(host: Host, http):
     assert 60 <= n <= 110  # ~94 frames/s from the synthetic source
 
 
-def perf(fps: float) -> dict[str, Any]:
+@pytest.mark.asyncio
+async def test_the_monitor_refresh_rate_follows_the_window(host: Host, window: FakeWindow, http):
+    shell = await connect(host, http)
+    assert (await shell.next_json("hello"))["refreshHz"] == 0  # not read yet
+    assert (await shell.next_json("display", timeout=2.5))["refreshHz"] == 60.0
+    window.hz = 30.0  # moved to a 30 Hz monitor
+    assert (await shell.next_json("display", timeout=2.5))["refreshHz"] == 30.0
+    assert (await (await connect(host, http)).next_json("hello"))["refreshHz"] == 30.0
+
+
+def perf(fps: float, *, throttled: bool = False) -> dict[str, Any]:
     return {
         "type": "perf",
         "key": "builtin/bars",
@@ -167,6 +181,7 @@ def perf(fps: float) -> dict[str, Any]:
         "shellMs": 0.0,
         "renderScale": 1.0,
         "dropped": 0,
+        "throttled": throttled,
     }
 
 
@@ -174,11 +189,22 @@ def perf(fps: float) -> dict[str, Any]:
 async def test_throttled_plugin_fps_triggers_one_native_click(host: Host, window: FakeWindow, http):
     shell = await connect(host, http)
     await shell.next_json("hello")
-    await shell.send(perf(20))  # WebKit's non-interacted cross-origin iframe rate
-    await shell.send(perf(20))  # rate-limited: no second click right away
+    await shell.send(perf(20, throttled=True))  # WebKit's non-interacted cross-origin iframe rate
+    await shell.send(perf(20, throttled=True))  # rate-limited: no second click right away
     await shell.send(perf(60))
     await asyncio.sleep(0.2)
     assert window.calls.count("click") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_capped_rate_the_shell_does_not_call_throttled_is_never_clicked(
+    host: Host, window: FakeWindow, http
+):
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await shell.send(perf(30))  # Battery's 30 fps cap, or a non-active slot
+    await asyncio.sleep(0.2)
+    assert window.calls.count("click") == 0
 
 
 @pytest.mark.asyncio
@@ -609,7 +635,7 @@ async def test_plugin_rate_changes_are_logged_once_per_crossing(
     await shell.next_json("hello")
     with caplog.at_level("INFO", logger="tidalviz.host"):
         for fps in (21, 22, 60, 61, 20):
-            await shell.send(perf(fps))
+            await shell.send(perf(fps, throttled=fps < 25))
         await asyncio.sleep(0.2)
     lines = [r.getMessage() for r in caplog.records if "fps" in r.getMessage()]
     assert lines == [

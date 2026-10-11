@@ -101,14 +101,16 @@ export function createAudioFrame() {
 }
 
 /**
- * Decode `buf` into `frame` (reused). Arrays become views over `buf`. Throws FrameError.
+ * Decode `buf` into `frame` (reused). Arrays become views over `buf`. Throws FrameError unless
+ * `validated` (peekFlags already checked this buffer).
  * @param {DecodedFrame} frame
  * @param {ArrayBuffer} buf
+ * @param {boolean} [validated]
  * @returns {DecodedFrame}
  */
-export function decodeInto(frame, buf) {
+export function decodeInto(frame, buf, validated = false) {
   const dv = new DataView(buf);
-  const flags = check(buf, dv);
+  const flags = validated ? dv.getUint16(6, true) : check(buf, dv);
   const b = dv.getUint16(24, true), s = dv.getUint16(26, true);
   const w = dv.getUint16(28, true), c = dv.getUint16(30, true);
 

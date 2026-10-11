@@ -31,6 +31,15 @@ def configure_gl_environment(
         environ.setdefault("__NV_DISABLE_EXPLICIT_SYNC", "1")
 
 
+def monitor_refresh_hz(widget: Any) -> float:
+    """Refresh rate of the monitor showing a realized Gtk widget, in Hz; 0 when unknown."""
+    window = widget.get_window()
+    if window is None:
+        return 0.0
+    monitor = widget.get_display().get_monitor_at_window(window)
+    return monitor.get_refresh_rate() / 1000 if monitor is not None else 0.0
+
+
 def _on_main(fn: Any) -> None:
     from gi.repository import GLib  # type: ignore[import-not-found]
 
@@ -43,6 +52,8 @@ def _on_main(fn: Any) -> None:
 
 class GtkWindow(PyWebviewWindow):
     """`WindowControl` for a pywebview GTK window."""
+
+    _refresh_hz = 0.0
 
     def _webview(self) -> Any:
         from webview.platforms.gtk import BrowserView  # type: ignore[import-untyped]
@@ -75,6 +86,16 @@ class GtkWindow(PyWebviewWindow):
                 wv.event(ev)
 
         _on_main(go)
+
+    def refresh_hz(self) -> float:
+        """The window's monitor refresh rate as of the previous call (0 = unknown). Each call
+        queues a fresh read on the GTK thread, so polling follows the window across monitors."""
+
+        def go() -> None:
+            self._refresh_hz = monitor_refresh_hz(self.win.native)
+
+        _on_main(go)
+        return self._refresh_hz
 
     def recover_webview(self) -> None:
         """A hung plugin shares the shell's WebContent process; kill it, then reload."""

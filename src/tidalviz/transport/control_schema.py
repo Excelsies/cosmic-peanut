@@ -75,6 +75,7 @@ _SCHEMAS: dict[str, dict[str, tuple[Check, bool]]] = {
                 "dropped",
             )
         },
+        "throttled": (_bool, True),
     },
     "onsetSeen": {"frameIndex": (_count, True)},
     "install": {"url": (_str, True)},

@@ -52,6 +52,13 @@ def test_builtin_renderers():
     }
 
 
+def test_webgl2_visualizers_drop_the_unused_canvas_depth_buffer():
+    """None of them depth-tests the default framebuffer (they all disable DEPTH_TEST)."""
+    webgl2 = [(repo, v) for repo, v in _entries() if v["renderer"] == "webgl2"]
+    assert len(webgl2) == 14
+    assert [v["id"] for _, v in webgl2 if v.get("depth", True)] == []
+
+
 def test_template_is_one_webgl2_visualizer():
     (viz,) = _manifest("template")["visualizers"]
     assert viz["renderer"] == "webgl2"

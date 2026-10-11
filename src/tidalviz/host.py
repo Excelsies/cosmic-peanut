@@ -39,7 +39,6 @@ from tidalviz.transport.control import HANG_AFTER_S, TextSocket
 log = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = 1
-THROTTLED_FPS = 40  # WebKit runs a never-clicked cross-origin iframe's rAF at 20 Hz
 CLICK_INTERVAL_S = 2.0
 RECOVER_INTERVAL_S = 60.0  # a web view that keeps failing after a reload must not loop
 STATS_INTERVAL_S = 1.0
@@ -71,6 +70,7 @@ class WindowControl(Protocol):
     def click_plugin(self) -> None: ...
     def recover_webview(self) -> None: ...
     def pick_folder(self) -> str | None: ...
+    def refresh_hz(self) -> float: ...  # the window's monitor, 0 = unknown
 
 
 def open_url(url: str) -> None:
@@ -139,6 +139,7 @@ class Host:
         self._last_click = -CLICK_INTERVAL_S
         self._last_recover = -RECOVER_INTERVAL_S
         self._throttled: bool | None = None
+        self._refresh_hz = 0.0
         self._tasks: set[asyncio.Future[Any]] = set()
         self._notices: list[dict[str, Any]] = []  # sent to the next shell after its hello
         self._source_request = 0  # the latest setSource wins, whichever listing finishes first
@@ -285,6 +286,7 @@ class Host:
             "activeSource": s["source"],
             "active": s["active"],
             "dev": self.dev,
+            "refreshHz": self._refresh_hz,
         }
 
     # --- control channel ------------------------------------------------------------------
@@ -338,8 +340,8 @@ class Host:
             case "params":
                 self.settings.set_params(msg["key"], msg["values"])
             case "perf":
-                self._log_rate(msg["key"], msg["fps"])
-                self._maybe_click(msg["fps"])
+                self._log_rate(msg["key"], msg["fps"], msg["throttled"])
+                self._maybe_click(msg["throttled"])
             case "onsetSeen":
                 self._onset_seen(msg["frameIndex"])
             case "setSource":
@@ -369,16 +371,16 @@ class Host:
             case _:
                 pass
 
-    def _log_rate(self, key: str, fps: float) -> None:
-        throttled = 0 < fps < THROTTLED_FPS
+    def _log_rate(self, key: str, fps: float, throttled: bool) -> None:
         if throttled != self._throttled:
             self._throttled = throttled
             log.info("%s %s at %.0f fps", key, "throttled" if throttled else "running", fps)
 
-    def _maybe_click(self, fps: float) -> None:
-        """Lift WebKit's 20 Hz throttle on a fresh plugin iframe with one native click."""
+    def _maybe_click(self, throttled: bool) -> None:
+        """Lift WebKit's 20 Hz throttle on a fresh plugin iframe with one native click. The
+        shell judges the throttle (active iframe only, against its fps cap)."""
         now = asyncio.get_running_loop().time()
-        if 0 < fps < THROTTLED_FPS and now - self._last_click >= CLICK_INTERVAL_S:
+        if throttled and now - self._last_click >= CLICK_INTERVAL_S:
             self._last_click = now
             self.window.click_plugin()
 
@@ -449,10 +451,18 @@ class Host:
         while True:
             await asyncio.sleep(STATS_INTERVAL_S)
             if self.servers.control.client_count:
+                await self._follow_refresh_rate()
                 stats = self.stats()
                 if self.bench is not None:
                     self.bench.add(stats)
                 await self.servers.control.broadcast_json(stats)
+
+    async def _follow_refresh_rate(self) -> None:
+        """The window may have moved to another monitor; the shell caps fps on a slow one."""
+        hz = self.window.refresh_hz()
+        if hz != self._refresh_hz:
+            self._refresh_hz = hz
+            await self.servers.control.broadcast_json({"type": "display", "refreshHz": hz})
 
     # --- installs (blocking registry work runs in a thread) --------------------------------
 

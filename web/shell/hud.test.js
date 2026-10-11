@@ -38,6 +38,7 @@ describe("hud", () => {
     vi.advanceTimersByTime(1000);
     expect(spy).not.toHaveBeenCalled();
     hud.setVisible(true);
+    vi.advanceTimersByTime(0); // shows what it has at once
     let writes = 0;
     const orig = hud.render;
     hud.render = () => {
@@ -49,5 +50,23 @@ describe("hud", () => {
       vi.advanceTimersByTime(10);
     }
     expect(writes).toBeLessThanOrEqual(4);
+  });
+
+  it("renders on data, with no timer left running while nothing arrives", () => {
+    const el = document.createElement("div");
+    const hud = createHud(el);
+    hud.setVisible(true);
+    vi.advanceTimersByTime(0);
+    expect(vi.getTimerCount()).toBe(0);
+    hud.setPerf(perf);
+    hud.setStats(stats); // same tick: one render
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(250); // the 4×/s cap counts from the render on show
+    expect(el.textContent).toContain("60 fps");
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(10_000);
+    hud.setVisible(false);
+    hud.setPerf({ ...perf, fps: 30 });
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

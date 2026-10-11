@@ -97,6 +97,74 @@ describe("boot", () => {
     ]);
   });
 
+  it("re-sizes the canvas when the device pixel ratio changes", async () => {
+    /** @type {Map<string, () => void>} */
+    const listeners = new Map();
+    const matchMedia = vi.fn((/** @type {string} */ query) => ({
+      matches: false,
+      addEventListener: (/** @type {string} */ _type, /** @type {() => void} */ fn) => listeners.set(query, fn),
+    }));
+    vi.stubGlobal("matchMedia", matchMedia);
+    vi.stubGlobal("devicePixelRatio", 1);
+    try {
+      const booted = boot(OPTS, { importModule: env({ frame: vi.fn() }).importModule });
+      sendInit(INIT, [fakePort()]);
+      await booted;
+      const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("canvas"));
+      const w1 = canvas.width;
+      vi.stubGlobal("devicePixelRatio", 2);
+      listeners.get("(resolution: 1dppx)")?.();
+      expect(canvas.width).toBe(w1 * 2);
+      expect(listeners.has("(resolution: 2dppx)")).toBe(true); // watches the next change
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("ctx.reduceMotion follows the media query without re-querying it per read", async () => {
+    let reads = 0;
+    /** @type {((e: { matches: boolean }) => void) | undefined} */
+    let onChange;
+    vi.stubGlobal("matchMedia", (/** @type {string} */ query) => ({
+      get matches() {
+        reads++;
+        return query.includes("reduced-motion");
+      },
+      addEventListener: (/** @type {string} */ _t, /** @type {any} */ fn) => {
+        if (query.includes("reduced-motion")) onChange = fn;
+      },
+    }));
+    try {
+      const e = env({ frame: vi.fn() });
+      const booted = boot(OPTS, { importModule: e.importModule });
+      sendInit(INIT, [fakePort()]);
+      await booted;
+      const ctx = /** @type {any} */ (e.create.mock.calls[0])[0];
+      const before = reads;
+      for (let i = 0; i < 10; i++) expect(ctx.reduceMotion).toBe(true);
+      expect(reads).toBe(before);
+      onChange?.({ matches: false });
+      expect(ctx.reduceMotion).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("passes the manifest's depth opt-out to the webgl2 context", async () => {
+    /** @type {any[]} */
+    const calls = [];
+    // @ts-ignore
+    HTMLCanvasElement.prototype.getContext = function (/** @type {string} */ kind, /** @type {any} */ opts) {
+      calls.push([kind, opts]);
+      return {};
+    };
+    const manifest = { ...OPTS.manifest, renderer: /** @type {const} */ ("webgl2"), depth: false };
+    const booted = boot({ ...OPTS, manifest }, { importModule: env({ frame: vi.fn() }).importModule });
+    sendInit(INIT, [fakePort()]);
+    await booted;
+    expect(calls[0]).toEqual(["webgl2", expect.objectContaining({ depth: false })]);
+  });
+
   it("handles webglcontextlost / restored on the canvas", async () => {
     const plugin = { frame: vi.fn(), dispose: vi.fn() };
     const e = env(plugin);

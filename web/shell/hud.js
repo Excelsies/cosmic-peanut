@@ -1,5 +1,5 @@
-// Perf HUD (toggle with P). Values arrive at 1 Hz; the DOM is written at most 4×/s and only
-// while visible, never on the frame path.
+// Perf HUD (toggle with P). Values arrive at 1 Hz; the DOM is written when they do, at most 4×/s
+// and only while visible, never on the frame path.
 
 import { h } from "./dom.js";
 
@@ -16,8 +16,8 @@ export function createHud(el) {
   /** @type {PluginPerf | null} */ let perf = null;
   /** @type {Stats | null} */ let stats = null;
   /** @type {number | undefined} */ let shellMs;
-  /** @type {ReturnType<typeof setInterval> | undefined} */ let timer;
-  let dirty = false;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */ let timer;
+  let last = -Infinity;
 
   /** @type {Record<string, HTMLElement>} */
   const cells = {};
@@ -46,6 +46,15 @@ export function createHud(el) {
     if (cells[id].textContent !== text) cells[id].textContent = text;
   };
 
+  const flush = () => {
+    timer = undefined;
+    last = Date.now();
+    api.render();
+  };
+  const touch = () => {
+    if (!el.hidden && timer === undefined) timer = setTimeout(flush, Math.max(0, last + RENDER_MS - Date.now()));
+  };
+
   const api = {
     get visible() {
       return !el.hidden;
@@ -53,32 +62,26 @@ export function createHud(el) {
     /** @param {boolean} v */
     setVisible(v) {
       el.hidden = !v;
-      clearInterval(timer);
+      clearTimeout(timer);
       timer = undefined;
-      if (v) {
-        dirty = true;
-        timer = setInterval(() => {
-          if (dirty) api.render();
-        }, RENDER_MS);
-      }
+      touch();
     },
     /** @param {PluginPerf} p */
     setPerf(p) {
       perf = p;
-      dirty = true;
+      touch();
     },
     /** @param {Stats} s */
     setStats(s) {
       stats = s;
-      dirty = true;
+      touch();
     },
     /** @param {number} ms */
     setShellMs(ms) {
       shellMs = ms;
-      dirty = true;
+      touch();
     },
     render() {
-      dirty = false;
       set("fps", perf ? `${Math.round(perf.fps)} fps${perf.renderScale < 1 ? ` @ ${Math.round(perf.renderScale * 100)}%` : ""}` : "–");
       set("frame", perf ? `${f(perf.frameMsP50)} / ${f(perf.frameMsP99)} ms` : "–");
       set("plugin", perf ? `${f(perf.pluginMsP50)} ms` : "–");

@@ -177,7 +177,7 @@ Host → shell:
 
 | type | Fields |
 | --- | --- |
-| `hello` | `version: 1`, `pluginOrigin`, `visualizers: VizInfo[]`, `repos: RepoInfo[]`, `settings`, `sources: SourceInfo[]`, `activeSource`, `active: key \| null`, `dev: bool` |
+| `hello` | `version: 1`, `pluginOrigin`, `visualizers: VizInfo[]`, `repos: RepoInfo[]`, `settings`, `sources: SourceInfo[]`, `activeSource`, `active: key \| null`, `dev: bool`, `refreshHz` (the window's monitor; 0 = unknown, e.g. macOS) |
 | `visualizers` | `visualizers: VizInfo[]`, `repos: RepoInfo[]` (registry changed) |
 | `reload` | `key` — dev folder changed; hot-reload if active |
 | `manifestError` | `repo`, `errors: {path, message}[]` |
@@ -189,6 +189,7 @@ Host → shell:
 | `installResult` | `id`, `ok`, `error?` |
 | `updates` | `repos: {repo, commit, message}[]` |
 | `disabled` | `key`, `reason` — hung/crashed plugin was disabled |
+| `display` | `refreshHz` — the window's monitor refresh rate changed (polled 1/s while a shell is connected) |
 
 `VizInfo = { key, repo, id, name, description, author, renderer, thumbnailUrl|null, params:
 ParamSpec[], values: ParamValues, disabled: bool, dev: bool, entryUrl, pageUrl }`
@@ -206,7 +207,7 @@ Shell → host:
 | `setSource` | `id` |
 | `settings` | partial settings object (persisted): `quality`, `reduceFlashing`, `autoCycleSeconds` (0 = off), `hudVisible`, `photosensitivityNoticeSeen`, `transparent`, `backgroundOpacity` (0–1, default 0), `visualOpacity` (0.1–1, default 1), … — the opacities apply only while `transparent` is on; out-of-range values are ignored. `hello.settings` returns the same keys |
 | `pluginError` | `key`, `message`, `file?`, `line?`, `fatal: bool` |
-| `perf` | `key`, `fps`, `frameMsP50`, `frameMsP99`, `pluginMsP50`, `shellMs`, `renderScale`, `dropped` (1/s) |
+| `perf` | `key`, `fps`, `frameMsP50`, `frameMsP99`, `pluginMsP50`, `shellMs`, `renderScale`, `dropped`, `throttled` (1/s). `throttled`: the active iframe looks held by WebKit's ~20 fps cross-origin throttle (15–25 fps and < 0.8 × min(60, `fpsCap`)); the host then sends a native click into the web view, at most every 2 s |
 | `onsetSeen` | `frameIndex` — SDK saw the onset of that frame (latency measurement) |
 | `install` | `url` → host fetches, then `installPrompt` |
 | `installConfirm` | `id`, `accept: bool` |
@@ -227,7 +228,7 @@ Shell → SDK (port):
 
 | Message | Notes |
 | --- | --- |
-| `{type:"tidalviz:init", params, quality, renderScaleMax, maxDpr, fpsCap, reduceFlashing, visible}` | Via `window.postMessage` with the port. `maxDpr`: auto/high = native, balanced ≤ 1.5, battery ≤ 1; `fpsCap`: 0 = uncapped, battery = 30; `renderScaleMax`: 1 |
+| `{type:"tidalviz:init", params, quality, renderScaleMax, maxDpr, fpsCap, reduceFlashing, visible}` | Via `window.postMessage` with the port. `maxDpr`: auto/high = 0 (native), balanced 1.5, battery 1 (the SDK applies min(live `devicePixelRatio`, `maxDpr`) and re-sizes when the DPR changes); `fpsCap`: 0 = uncapped, battery = 30, and at most `refreshHz` when the monitor runs under 55 Hz (WebKitGTK paces rAF from a 60 Hz timer); `renderScaleMax`: 1 |
 | `ArrayBuffer` | A binary v1 frame, **transferred** (the shell keeps no reference). During a crossfade the second iframe gets a copy |
 | `{type:"params", changed}` | |
 | `{type:"settings", quality?, maxDpr?, fpsCap?, reduceFlashing?}` | |

@@ -104,6 +104,10 @@ class PyWebviewWindow:
 
         _on_main(go)
 
+    def refresh_hz(self) -> float:
+        """Unknown (0): WKWebView paces rAF to the display itself, so the shell assumes 60 Hz."""
+        return 0.0
+
     def pick_folder(self) -> str | None:
         import webview  # type: ignore[import-not-found]
 

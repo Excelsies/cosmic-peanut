@@ -155,6 +155,9 @@ class _NullWindow:
     def pick_folder(self) -> str | None:
         return None
 
+    def refresh_hz(self) -> float:
+        return 0.0
+
 
 async def _measure(source: str, seconds: float, warmup: float) -> dict[str, Any]:
     import psutil

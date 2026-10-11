@@ -43,9 +43,10 @@ const fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/
  * @param {HTMLElement} el
  * @param {ParamSpec[]} specs
  * @param {ParamValues} values
- * @param {(all: ParamValues, changed: ParamValues) => void} onChange
+ * @param {(all: ParamValues, changed: ParamValues) => void} onChange live, on every input
+ * @param {(all: ParamValues) => void} onSave once a value settles: a slider or colour on release
  */
-export function renderParams(el, specs, values, onChange) {
+export function renderParams(el, specs, values, onChange, onSave) {
   el.replaceChildren();
   if (specs.length === 0) {
     el.append(h("p", { class: "muted" }, "No parameters for this visualizer."));
@@ -59,6 +60,12 @@ export function renderParams(el, specs, values, onChange) {
   const change = (id, v) => {
     current[id] = v;
     onChange({ ...current }, { [id]: v });
+  };
+  const save = () => onSave({ ...current });
+  /** @param {string} id @param {ParamValue} v */
+  const commit = (id, v) => {
+    change(id, v);
+    save();
   };
 
   for (const spec of specs) {
@@ -76,6 +83,7 @@ export function renderParams(el, specs, values, onChange) {
         out.textContent = fmt(v);
         change(spec.id, v);
       });
+      input.addEventListener("change", save);
       setters.set(spec.id, (v) => {
         input.value = String(v);
         out.textContent = fmt(/** @type {number} */ (v));
@@ -84,17 +92,18 @@ export function renderParams(el, specs, values, onChange) {
     } else if (spec.type === "color") {
       const input = /** @type {HTMLInputElement} */ (h("input", { id, type: "color", value: current[spec.id] }));
       input.addEventListener("input", () => change(spec.id, input.value));
+      input.addEventListener("change", save);
       setters.set(spec.id, (v) => (input.value = String(v)));
       row = h("div", { class: "param param-inline" }, label, input);
     } else if (spec.type === "boolean") {
       const input = /** @type {HTMLInputElement} */ (h("input", { id, type: "checkbox", checked: current[spec.id] }));
-      input.addEventListener("change", () => change(spec.id, input.checked));
+      input.addEventListener("change", () => commit(spec.id, input.checked));
       setters.set(spec.id, (v) => (input.checked = Boolean(v)));
       row = h("div", { class: "param param-inline" }, label, input);
     } else {
       const select = /** @type {HTMLSelectElement} */ (h("select", { id }, spec.options.map((o) => h("option", { value: o }, o))));
       select.value = String(current[spec.id]);
-      select.addEventListener("change", () => change(spec.id, select.value));
+      select.addEventListener("change", () => commit(spec.id, select.value));
       setters.set(spec.id, (v) => (select.value = String(v)));
       row = h("div", { class: "param param-inline" }, label, select);
     }
@@ -111,6 +120,7 @@ export function renderParams(el, specs, values, onChange) {
       setters.get(s.id)?.(s.default);
     }
     onChange({ ...current }, changed);
+    save();
   });
   el.append(reset);
 }

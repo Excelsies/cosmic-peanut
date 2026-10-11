@@ -70,6 +70,7 @@ async function start(opts, init, port, load) {
         gpu: navigator.gpu,
         importThree: () => load("three"),
         fallback: opts.manifest.fallback,
+        depth: opts.manifest.depth,
       }),
     raf: (cb) => requestAnimationFrame(cb),
     caf: (id) => cancelAnimationFrame(id),
@@ -78,8 +79,11 @@ async function start(opts, init, port, load) {
     fetch: (url) => fetch(url),
     createImageBitmap: (b) => createImageBitmap(b),
     reduceMotion: (() => {
+      // Plugins read it every frame: cache it, updated on change.
       const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-      return () => mq?.matches ?? false;
+      let reduce = mq?.matches ?? false;
+      mq?.addEventListener?.("change", (e) => (reduce = e.matches));
+      return () => reduce;
     })(),
   });
 
@@ -103,6 +107,18 @@ async function start(opts, init, port, load) {
   } else {
     window.addEventListener("resize", () => rt.setCssSize(canvas.clientWidth, canvas.clientHeight));
   }
+
+  // A DPR change (window moved to another monitor) resizes nothing; watch for it explicitly.
+  const watchDpr = () =>
+    window.matchMedia?.(`(resolution: ${window.devicePixelRatio || 1}dppx)`).addEventListener(
+      "change",
+      () => {
+        rt.dprChanged();
+        watchDpr();
+      },
+      { once: true },
+    );
+  watchDpr();
 
   await rt.start();
   return rt;
