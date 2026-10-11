@@ -95,14 +95,16 @@ class Analyzer:                                      # runs extractors in order
 def encode(frame: AudioFrame) -> bytes              # binary v1
 def decode(data: bytes) -> AudioFrame               # for tests / tooling
 class FrameHub:                                      # lives on the asyncio loop
-    def publish(self, data: bytes) -> None           # keeps only the newest; never queues
+    def publish(self, data: bytes) -> bool           # keeps only the newest; never queues
 ```
 
 Threads: catap worker (Linux: the `pw-record` reader thread) → `on_samples` copies into the ring
 and returns. The analysis thread wakes each hop (512 samples), runs the `Analyzer`, encodes, and
 calls `loop.call_soon_threadsafe(hub.publish, data)`. The hub sends the newest frame to each client
-whose previous send has completed and drops the rest. Analysis pauses while no renderer is
-connected.
+whose previous send has completed and drops the rest. When it replaces a pending onset frame, it
+sets the onset flag on the newer frame (keeping that frame's own `onsetAge`, which already counts
+from the dropped onset) and returns `True`, so the host can time that frame's `onsetSeen`.
+Analysis pauses while no renderer is connected.
 
 ## 3. HTTP servers
 

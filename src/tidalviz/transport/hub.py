@@ -5,6 +5,8 @@ import contextlib
 import logging
 from typing import Protocol
 
+from tidalviz.transport.frame import FLAG_ONSET
+
 log = logging.getLogger(__name__)
 
 
@@ -57,14 +59,27 @@ class FrameHub:
             with contextlib.suppress(asyncio.CancelledError):
                 await client.task
 
-    def publish(self, data: bytes) -> None:
-        """Hand the newest frame to every client. Never blocks, never queues more than one."""
+    def publish(self, data: bytes) -> bool:
+        """Hand the newest frame to every client. Never blocks, never queues more than one.
+
+        A replaced frame's onset flag (protocols §1) is carried onto ``data``, which keeps its
+        own onsetAge. Returns whether any client got ``data`` with a carried onset.
+        """
+        carried: bytes | None = None
         for client in self._clients.values():
-            if client.pending is not None:
+            frame = data
+            if (pending := client.pending) is not None:
                 client.dropped += 1
                 self._total_dropped += 1
-            client.pending = data
+                if pending[6] & FLAG_ONSET and not data[6] & FLAG_ONSET:
+                    if carried is None:
+                        patched = bytearray(data)
+                        patched[6] |= FLAG_ONSET
+                        carried = bytes(patched)
+                    frame = carried
+            client.pending = frame
             client.ready.set()
+        return carried is not None
 
     def pending(self, ws: BinarySink) -> int:
         client = self._clients.get(ws)

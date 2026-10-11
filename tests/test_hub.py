@@ -1,9 +1,11 @@
 """FrameHub: latest-only fan-out of binary frames to WebSocket clients."""
 
 import asyncio
+import struct
 
 import pytest
 
+from tidalviz.transport.frame import FLAG_ONSET, FLAG_STEREO, MAGIC
 from tidalviz.transport.hub import FrameHub
 
 
@@ -31,6 +33,12 @@ class FakeWs:
             self.in_flight -= 1
 
 
+def frame(index: int, flags: int = 0, onset_age: float = 0.0) -> bytes:
+    """A frame-shaped payload (protocols §1): the hub reads only the flags."""
+    head = struct.pack("<IHHIfd", MAGIC, 1, flags, index, 48_000.0, 0.0)
+    return head + bytes(4 * 13) + struct.pack("<f", onset_age) + bytes(8)
+
+
 async def settle() -> None:
     for _ in range(10):
         await asyncio.sleep(0)
@@ -54,16 +62,16 @@ async def test_slow_client_skips_to_the_newest_frame() -> None:
     hub = FrameHub()
     slow = FakeWs(gated=True)
     hub.add(slow)
-    hub.publish(b"first")
+    hub.publish(frame(0))
     await settle()  # the first send is now in flight and blocked
-    for i in range(100):
-        hub.publish(f"f{i}".encode())
+    for i in range(1, 101):
+        hub.publish(frame(i))
         assert hub.pending(slow) <= 1
     await settle()
     assert slow.max_in_flight == 1
     slow.gate.set()
     await settle()
-    assert slow.sent == [b"first", b"f99"]
+    assert slow.sent == [frame(0), frame(100)]
     assert hub.dropped(slow) == 99
     await hub.close()
 
@@ -75,7 +83,7 @@ async def test_slow_client_does_not_hold_back_a_fast_one() -> None:
     hub.add(slow)
     hub.add(fast)
     for i in range(10):
-        hub.publish(bytes([i]))
+        hub.publish(frame(i))
         await settle()
     assert len(fast.sent) == 10
     assert slow.sent == []
@@ -125,8 +133,29 @@ async def test_total_dropped_sums_clients() -> None:
     hub.add(a)
     hub.add(b)
     for i in range(4):
-        hub.publish(bytes([i]))
+        hub.publish(frame(i))
         await settle()
     assert hub.dropped(a) == 2 and hub.dropped(b) == 2
     assert hub.total_dropped == 4
+    await hub.close()
+
+
+@pytest.mark.asyncio
+async def test_an_onset_on_a_replaced_frame_is_carried_onto_the_newer_one() -> None:
+    hub = FrameHub()
+    slow, fast = FakeWs(gated=True), FakeWs()
+    hub.add(slow)
+    hub.add(fast)
+    hub.publish(frame(1))
+    await settle()  # in flight on the slow client
+    assert hub.publish(frame(2, flags=FLAG_ONSET | FLAG_STEREO, onset_age=0.001)) is False
+    await settle()
+    assert hub.publish(frame(3, flags=FLAG_STEREO, onset_age=0.012)) is True
+    await settle()
+    slow.gate.set()
+    await settle()
+    # The newer frame keeps its own onsetAge, which already counts from the dropped onset.
+    assert slow.sent == [frame(1), frame(3, flags=FLAG_ONSET | FLAG_STEREO, onset_age=0.012)]
+    assert fast.sent[-1] == frame(3, flags=FLAG_STEREO, onset_age=0.012)
+    assert hub.publish(frame(4)) is False
     await hub.close()

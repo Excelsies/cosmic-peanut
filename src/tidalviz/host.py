@@ -188,12 +188,19 @@ class Host:
     def _publish(self, data: bytes) -> None:
         """Analysis thread → event loop; the hub keeps only the newest frame."""
         if data[6] & 1:  # onset flag (protocols §1)
-            (index,) = struct.unpack_from("<I", data, 8)
-            (host_time,) = struct.unpack_from("<d", data, 16)
-            self._onsets.append((index, host_time))
+            self._record_onset(data)
         loop = self._loop
         if loop is not None and not loop.is_closed():
-            loop.call_soon_threadsafe(self.servers.hub.publish, data)
+            loop.call_soon_threadsafe(self._deliver, data)
+
+    def _deliver(self, data: bytes) -> None:
+        if self.servers.hub.publish(data):  # carried a dropped frame's onset onto this one
+            self._record_onset(data)
+
+    def _record_onset(self, data: bytes) -> None:
+        (index,) = struct.unpack_from("<I", data, 8)
+        (host_time,) = struct.unpack_from("<d", data, 16)
+        self._onsets.append((index, host_time))
 
     def use_dev_folder(self, folder: Path) -> str:
         """Register a plugin folder in place and make its first visualizer active."""

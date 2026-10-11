@@ -360,6 +360,21 @@ async def test_stats_are_broadcast_with_onset_latency(tmp_path: Path, window: Fa
         await h.stop()
 
 
+@pytest.mark.asyncio
+async def test_an_onset_carried_past_a_dropped_frame_is_still_timed(host: Host):
+    from tests.test_hub import FakeWs, frame, settle
+    from tidalviz.transport.frame import FLAG_ONSET
+
+    slow = FakeWs(gated=True)
+    host.servers.hub.add(slow)
+    for f in (frame(1), frame(2, flags=FLAG_ONSET), frame(3)):
+        host._publish(f)
+        await settle()
+    assert [i for i, _ in host._onsets] == [2, 3]  # frame 3 reached the shell flagged
+    slow.gate.set()
+    await host.servers.hub.remove(slow)
+
+
 # --- install flow (local fixture repos; no network) -----------------------------------------
 
 from tests.test_git_fetch import commit_files, plugin_files  # noqa: E402
