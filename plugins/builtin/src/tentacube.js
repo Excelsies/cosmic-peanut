@@ -131,12 +131,13 @@ export default async function create(ctx) {
     uniforms: bgUniforms,
     vertexShader: bgVert,
     fragmentShader: bgFrag,
-    depthTest: false,
     depthWrite: false,
   });
+  // Drawn after the opaque creature at depth 1 (background.vert), so the depth test skips the
+  // tiling under it.
   const bg = new THREE.Mesh(quadGeo, bgMat);
   bg.frustumCulled = false;
-  bg.renderOrder = -1;
+  bg.renderOrder = 1;
   scene.add(bg);
 
   // Environment: the same shader over an equirect, then PMREM.
