@@ -52,8 +52,12 @@ vec4 sampleInk(vec2 px) {
   // paper) to a power γ ≥ 1 and renormalise. Where two shares are equal they stay equal, so every
   // boundary stays exactly where it was (no drift, no facets, no paper leaking into junctions);
   // only the transition across it narrows. γ − 1 scales with the blur this sample added.
-  float g = 1.0 + u_sharp * 2.0 * (f.x * (1.0 - f.x) + f.y * (1.0 - f.y));
   float paper = max(0.0, 1.0 - (v.x + v.y + v.z + v.w));
+  if (u_sharp == 0.0) {   // γ = 1: renormalise only
+    float n = v.x + v.y + v.z + v.w + paper;
+    return n > 0.0 ? v / n : v;
+  }
+  float g = 1.0 + u_sharp * 2.0 * (f.x * (1.0 - f.x) + f.y * (1.0 - f.y));
   vec4 wv = pow(max(v, vec4(0.0)), vec4(g));
   float wp = pow(paper, g);
   float n = wv.x + wv.y + wv.z + wv.w + wp;
