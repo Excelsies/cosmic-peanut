@@ -2,10 +2,11 @@
 /**
  * Orbit — 64 glowing pillars on a ring for the `three` renderer.
  *
- * One InstancedMesh (one draw call) whose per-instance scale and colour follow `audio.bands`,
- * updated through a reused Object3D/Color so the frame loop allocates nothing. The camera circles
- * the ring at a rate locked to the tempo and dips on each beat (`beatPhase`). Bloom comes from
- * `three/addons` (EffectComposer + UnrealBloomPass) at half resolution, so `autoRender` is off.
+ * One InstancedMesh (one draw call) whose per-instance scale and colour follow `audio.bands`; the
+ * frame loop writes scale.y into the prebuilt instance matrices and reuses a Color, so it allocates
+ * nothing. The camera circles the ring at a rate locked to the tempo and dips on each beat
+ * (`beatPhase`). Bloom comes from `three/addons` (EffectComposer + UnrealBloomPass) at half
+ * resolution, so `autoRender` is off.
  *
  * Transparent canvas: the scene has no background and renders over 0,0,0,0, so every pass works on
  * "light on black". UnrealBloomPass doesn't keep a meaningful alpha, so the OutputPass (already the
@@ -45,6 +46,16 @@ export default function create(ctx) {
   pillars.setColorAt(0, new THREE.Color()); // allocates instanceColor
   /** @type {THREE.InstancedBufferAttribute} */ (pillars.instanceColor).setUsage(THREE.DynamicDrawUsage);
   scene.add(pillars);
+  // Position and rotation never change; per frame only scale.y (matrix element 5) is written.
+  const mats = pillars.instanceMatrix.array;
+  const dummy = new THREE.Object3D();
+  for (let i = 0; i < COUNT; i++) {
+    const a = (i / COUNT) * TAU;
+    dummy.position.set(Math.cos(a) * RADIUS, 0, Math.sin(a) * RADIUS);
+    dummy.rotation.set(0, -a, 0);
+    dummy.updateMatrix();
+    pillars.setMatrixAt(i, dummy.matrix);
+  }
 
   // Mirror image under a dark glossy floor line: a second instanced mesh sharing the matrices.
   const reflectMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07, depthWrite: false });
@@ -98,7 +109,6 @@ export default function create(ctx) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
 
   // Reused per-frame scratch.
-  const dummy = new THREE.Object3D();
   const color = new THREE.Color();
   const base = new THREE.Color();
   const hsl = { h: 0, s: 0, l: 0 };
@@ -147,12 +157,7 @@ export default function create(ctx) {
         const v = bands[b];
         levels[i] = v > levels[i] ? v : levels[i] * keep + v * (1 - keep);
         const lv = levels[i];
-        const a = (i / COUNT) * TAU;
-        dummy.position.set(Math.cos(a) * RADIUS, 0, Math.sin(a) * RADIUS);
-        dummy.rotation.set(0, -a, 0);
-        dummy.scale.set(1, 0.08 + lv * 3.2, 1);
-        dummy.updateMatrix();
-        pillars.setMatrixAt(i, dummy.matrix);
+        mats[i * 16 + 5] = 0.08 + lv * 3.2;
         color.setHSL((hsl.h + 1 - (b / 64) * 0.16) % 1, 0.9, 0.06 + lv * 0.38);
         pillars.setColorAt(i, color);
       }
