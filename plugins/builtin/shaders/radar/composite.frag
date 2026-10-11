@@ -6,7 +6,8 @@
 // brightest channel, so the face is dark but see-through and only the light floats over the desktop.
 precision highp float;
 out vec4 o;
-uniform sampler2D u_phos;
+uniform sampler2D u_phos;   // brightness · e^clock (paint.frag)
+uniform float u_fade;       // e^−clock
 uniform vec2 u_center;      // px (drawing buffer, GL y-up)
 uniform float u_radius;     // px
 uniform float u_turn;       // arm bearing, turns 0–1
@@ -40,12 +41,12 @@ void main() {
   float s = max(1.0, u_radius / 700.0);               // line weight scale (1 at ~1440p)
 
   // Phosphor returns, plus a soft glow from a ring of wider taps (cheap bloom).
-  float ph = respond(r <= 1.0 ? texture(u_phos, vec2(bearing, r)).r : 0.0);
+  float ph = respond(r <= 1.0 ? texture(u_phos, vec2(bearing, r)).r * u_fade : 0.0);
   float g = 0.0;
   float k = 0.008;
   g += phos(p + vec2(k, 0.0)) + phos(p - vec2(k, 0.0)) + phos(p + vec2(0.0, k)) + phos(p - vec2(0.0, k));
   g += phos(p + vec2(k, k) * 1.6) + phos(p - vec2(k, k) * 1.6) + phos(p + vec2(k, -k) * 1.6) + phos(p - vec2(k, -k) * 1.6);
-  g = respond(g * 0.125);
+  g = respond(g * 0.125 * u_fade);
 
   // Sweep arm and the illuminated fan trailing it.
   float behind = fract(u_turn - bearing);             // 0 at the arm, growing behind it

@@ -105,6 +105,31 @@ export function wedgeMix(bearing, start, span) {
   return Math.min(1, (d - Math.floor(d)) / span);
 }
 
+/**
+ * The phosphor columns (of `n` around the scope) the wedge [start, start + span) touches, as two
+ * column ranges `out = [x0, width0, x1, width1]` inside 0..n (the second is empty unless the wedge
+ * wraps past north): a scissor for the wedge-only paint pass, a column wider than the wedge on
+ * each side. Painting still tests inWedge per texel.
+ * @param {number} start @param {number} span @param {number} n
+ * @param {Int32Array | number[]} out length ≥ 4
+ */
+export function wedgeColumns(start, span, n, out) {
+  let a = Math.floor(start * n) - 1;
+  let b = Math.ceil((start + span) * n) + 1;
+  if (span >= 1 || b - a >= n) {
+    a = 0;
+    b = n;
+  } else if (a < 0) {
+    a += n;
+    b += n;
+  }
+  out[0] = a;
+  out[1] = Math.min(b, n) - a;
+  out[2] = 0;
+  out[3] = Math.max(0, b - n);
+  return out;
+}
+
 /** Radius (fraction of the scope) of the lowest (F_MIN) and highest (`maxFreq`) frequency drawn. */
 export const R_INNER = 0.06;
 export const R_OUTER = 0.95;
@@ -243,25 +268,39 @@ export const DECAY_STEP = 1 / 240;
 const DECAY_MIN_RATE = 0.05;
 
 /**
- * Fixed-timestep phosphor decay. `persistence` is the afterglow's time constant in rotations, so
- * the trail always fades over about the same arc whatever the sweep speed.
+ * Decay clock exponent past which the phosphor store is rebased: values are stored as
+ * brightness · e^clock, at most gain 3 · e^8 ≈ 8900, well inside half-float range.
+ */
+export const REBASE_AT = 8;
+
+/**
+ * Fixed-timestep phosphor decay, as a clock. `persistence` is the afterglow's time constant in
+ * rotations, so the trail always fades over about the same arc whatever the sweep speed. `clock`
+ * is the decay exponent accumulated since the last rebase(): phosphor written at clock c has faded
+ * by exp(c − clock) since, the product of every frame's fade.
  */
 export function createDecay() {
   const d = {
     /** Unconsumed time, seconds. */
     acc: 0,
+    /** Decay exponent since the last rebase(). */
+    clock: 0,
     /**
      * @param {number} dt seconds
      * @param {number} rate sweep rate, turns/s
      * @param {number} persistence afterglow, rotations
-     * @returns {number} factor to multiply the phosphor by this frame
+     * @returns {number} the advanced clock
      */
     step(dt, rate, persistence) {
       d.acc += dt;
       const n = Math.floor(d.acc / DECAY_STEP + 1e-9);
       d.acc = Math.max(0, d.acc - n * DECAY_STEP);
       const perStep = (DECAY_STEP * Math.max(DECAY_MIN_RATE, rate)) / Math.max(0.01, persistence);
-      return Math.exp(-n * perStep);
+      d.clock += n * perStep;
+      return d.clock;
+    },
+    rebase() {
+      d.clock = 0;
     },
   };
   return d;

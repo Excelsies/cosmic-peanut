@@ -9,11 +9,14 @@
  * buffer that decays over about one rotation. Sustained tones trace concentric arcs, a melody
  * steps between radii, drum hits leave radial spokes, and silence is black. It is fully deterministic.
  *
- * GPU: the phosphor is a fixed 2048 × 512 (bearing × radius) one-channel half-float ping-pong,
- * independent of the canvas size; each frame one pass decays it and repaints the wedge swept since
- * the last frame (blending last frame's spectrum into this one's across the wedge), and one
- * full-screen pass draws the scope (phosphor + glow, arm, graticule) analytically. Pure logic is in
- * lib/radar.js and tested there. Nothing is allocated per frame.
+ * GPU: the phosphor is a fixed 2048 × 512 (bearing × radius) one-channel half-float store,
+ * independent of the canvas size. It decays by a clock (lib/radar.js createDecay): texels are
+ * stored as brightness · e^clock and the scope multiplies every read by e^−clock, so each frame one
+ * scissored pass repaints only the wedge swept since the last frame, in place (blending last
+ * frame's spectrum into this one's across the wedge); a full ping-pong pass rebases the store when
+ * the clock reaches REBASE_AT, and every frame without float rendering (an 8-bit store, which the
+ * scaling would clip). One full-screen pass draws the scope (phosphor + glow, arm, graticule)
+ * analytically. Pure logic is in lib/radar.js and tested there. Nothing is allocated per frame.
  */
 import { createFlashLimiter } from "./lib/flash.js";
 import { createProgram, createTarget } from "./lib/gl.js";
@@ -24,7 +27,9 @@ import {
   createSweep,
   fitScope,
   phosphorPalette,
+  REBASE_AT,
   sweptWedge,
+  wedgeColumns,
 } from "./lib/radar.js";
 
 /** Phosphor texels around the scope (bearing) and along a radius. */
@@ -45,7 +50,7 @@ export default async function create(ctx) {
   const comp = createProgram(gl, vs, compFs, dir + "composite.frag");
   const vao = gl.createVertexArray();
 
-  // Phosphor ping-pong; bearing wraps around, radius clamps.
+  // Phosphor store (ping-pong for rebases); bearing wraps around, radius clamps.
   const targets = [createTarget(gl, { red: true }), createTarget(gl, { red: true })];
   for (const t of targets) {
     t.resize(N_ANG, N_RAD);
@@ -69,6 +74,7 @@ export default async function create(ctx) {
   const decay = createDecay();
   const level = createLevel();
   const wedge = new Float32Array(2);
+  const cols = new Int32Array(4);
   const scope = { cx: 0, cy: 0, radius: 0 };
   const pal = new Float32Array(6);
   const sweepIn = { sync: "bar", speed: 0.25, bpm: 0, beatPhase: 0, reduceMotion: false };
@@ -107,20 +113,38 @@ export default async function create(ctx) {
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N_RAD, 1, gl.RED, gl.FLOAT, last);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 1, N_RAD, 1, gl.RED, gl.FLOAT, column);
 
-      // 1. Decay the phosphor and paint this frame's spectrogram slice into the swept wedge.
-      const src = targets[cur];
-      const dst = targets[cur ^ 1];
+      // 1. Paint this frame's spectrogram slice into the swept wedge: in place, or rebasing the
+      // whole store (faded by the clock) into the other target.
+      const clock = decay.step(time.dt, sweep.rate, Number(p.persistence));
+      const full = !targets[0].float || clock > REBASE_AT;
+      const dst = targets[full ? cur ^ 1 : cur];
       gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
       gl.viewport(0, 0, N_ANG, N_RAD);
       gl.useProgram(paint.program);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, src.tex);
+      // Only full passes read u_prev; in place it must still not be the texture being drawn.
+      gl.bindTexture(gl.TEXTURE_2D, targets[full ? cur : cur ^ 1].tex);
       gl.uniform1i(paint.u.u_prev, 0);
       gl.uniform1i(paint.u.u_column, 1);
-      gl.uniform1f(paint.u.u_decay, decay.step(time.dt, sweep.rate, Number(p.persistence)));
+      gl.uniform1i(paint.u.u_full, full ? 1 : 0);
+      gl.uniform1f(paint.u.u_decay, Math.exp(-clock));
+      gl.uniform1f(paint.u.u_scale, full ? 1 : Math.exp(clock));
       gl.uniform1f(paint.u.u_start, wedge[0]);
       gl.uniform1f(paint.u.u_span, wedge[1]);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if (full) {
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        decay.rebase();
+        cur ^= 1;
+      } else {
+        wedgeColumns(wedge[0], wedge[1], N_ANG, cols);
+        gl.enable(gl.SCISSOR_TEST);
+        for (let r = 0; r < 4; r += 2) {
+          if (cols[r + 1] <= 0) continue;
+          gl.scissor(cols[r], 0, cols[r + 1], N_RAD);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+        gl.disable(gl.SCISSOR_TEST);
+      }
 
       // 2. The scope, to the transparent premultiplied canvas.
       const { width: w, height: h } = ctx.size;
@@ -132,6 +156,7 @@ export default async function create(ctx) {
       gl.useProgram(comp.program);
       gl.bindTexture(gl.TEXTURE_2D, dst.tex);
       gl.uniform1i(comp.u.u_phos, 0);
+      gl.uniform1f(comp.u.u_fade, Math.exp(-decay.clock));
       gl.uniform2f(comp.u.u_center, scope.cx, scope.cy);
       gl.uniform1f(comp.u.u_radius, scope.radius);
       gl.uniform1f(comp.u.u_turn, now - Math.floor(now));
@@ -140,8 +165,6 @@ export default async function create(ctx) {
       gl.uniform1f(comp.u.u_grat, Number(p.graticule));
       gl.uniform1f(comp.u.u_gain, 1 + 0.2 * pulse);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-      cur ^= 1;
     },
 
     // The phosphor is polar and canvas-independent; the scope is re-fitted every frame.
