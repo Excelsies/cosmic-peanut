@@ -149,7 +149,7 @@ class Host:
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
         await self.servers.start()
-        self.pipeline = AudioPipeline(make_source(self.settings.data["source"]), self._publish)
+        self.pipeline = AudioPipeline(self._initial_source(), self._publish)
         self.pipeline.pause()  # resumed when a shell connects
         self.pipeline.start()
         for key, folder in self.registry.dev_folders().items():
@@ -157,6 +157,23 @@ class Host:
         self.watcher.start()
         self._process.cpu_percent(None)  # prime: the first call always returns 0
         self._stats_task = asyncio.create_task(self._stats_loop())
+
+    def _initial_source(self) -> AudioSource:
+        """The saved source, or system audio if it is gone (an app:<pid> whose app quit)."""
+        source_id = self.settings.data["source"]
+        try:
+            return make_source(source_id)
+        except (ValueError, StopIteration):
+            log.warning("audio source %s is unavailable; using system audio", source_id)
+        self.settings.data["source"] = "system"
+        self._notices.append(
+            {
+                "type": "status",
+                "level": "warn",
+                "text": f"Audio source {source_id} is no longer available; capturing all audio.",
+            }
+        )
+        return make_source("system")
 
     async def stop(self) -> None:
         if self._stats_task is not None:

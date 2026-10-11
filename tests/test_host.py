@@ -276,6 +276,33 @@ async def test_set_source_switches_capture_and_persists(host: Host, http):
 
 
 @pytest.mark.asyncio
+async def test_saved_app_source_that_is_gone_falls_back_to_system_audio(
+    tmp_path: Path, window: FakeWindow, http, monkeypatch: pytest.MonkeyPatch
+):
+    from tidalviz import host as host_module
+    from tidalviz.capture import SyntheticSource
+    from tidalviz.settings import Settings
+
+    root = tmp_path / "home"
+    Settings(root / "settings.json").update({"source": "app:999999"})
+    monkeypatch.setattr(host_module, "list_audio_apps", lambda: [])
+    # Stands in for system capture so the test doesn't spawn pw-record / a process tap.
+    system = SyntheticSource("silence")
+    monkeypatch.setattr(host_module, "system_source", lambda: system)
+    h = Host(root=root, builtin_dirs=BUILTINS, window=window)
+    await h.start()
+    try:
+        assert h.pipeline is not None and h.pipeline.source is system
+        shell = await connect(h, http)
+        hello = await shell.next_json("hello")
+        assert hello["activeSource"] == "system"
+        status = await shell.next_json("status")
+        assert status["level"] == "warn" and "app:999999" in status["text"]
+    finally:
+        await h.stop()
+
+
+@pytest.mark.asyncio
 async def test_unknown_source_is_rejected_with_a_status(host: Host, http):
     shell = await connect(host, http)
     await shell.next_json("hello")
