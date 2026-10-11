@@ -17,6 +17,8 @@ export function fakeWebGL2({ extensions = ["EXT_color_buffer_float"] } = {}) {
   ]);
   /** @param {string} k */
   const constant = (k) => {
+    const unit = /^TEXTURE(\d+)$/.exec(k);
+    if (unit) return 0x84c0 + Number(unit[1]);
     if (!consts.has(k)) consts.set(k, 0x100000 + consts.size);
     return /** @type {number} */ (consts.get(k));
   };
@@ -55,7 +57,7 @@ export function fakeWebGL2({ extensions = ["EXT_color_buffer_float"] } = {}) {
       const v = p.values.get(name);
       if (!v) throw new Error(`${p.label}: uniform ${name} never set`);
       uniforms[name] = v;
-      if (p.shaders.some((s) => new RegExp(`uniform\\s+sampler2D\\s+${name}\\b`).test(s.src))) {
+      if (p.shaders.some((s) => new RegExp(`uniform\\s+(?:[a-z]+p\\s+)?sampler2D\\s+${name}\\b`).test(s.src))) {
         textures[name] = units[v[0]] ?? null;
       }
     }
@@ -77,7 +79,7 @@ export function fakeWebGL2({ extensions = ["EXT_color_buffer_float"] } = {}) {
       const fs = p.shaders[p.shaders.length - 1].src;
       p.label = /^\/\/ (.*)$/m.exec(fs)?.[1] ?? "";
       for (const s of p.shaders) {
-        for (const m of s.src.matchAll(/^\s*uniform\s+\w+\s+([^;]+);/gm)) {
+        for (const m of s.src.matchAll(/^\s*uniform\s+(?:[a-z]+p\s+)?\w+\s+([^;]+);/gm)) {
           for (const n of m[1].split(",")) {
             const name = n.trim().replace(/\[.*$/, "");
             if (!p.names.includes(name)) p.names.push(name);
