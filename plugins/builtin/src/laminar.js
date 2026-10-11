@@ -25,7 +25,7 @@
  * sphere through the stream on a spring, the bass swells it (and the fluid it displaces), and a
  * small flash-limited brightness lift marks each beat. Pure logic in lib/laminar.js + lib/flow.js.
  *
- * Sim targets are RGBA16F (velocity, scalars) and R16F (pressure), which need
+ * Sim targets are RG16F (velocity), RGBA16F (scalars) and R16F (pressure), which need
  * EXT_color_buffer_float or EXT_color_buffer_half_float. Without either (an RGBA8-only GPU) there
  * is no sim: the composite draws the lines as the streamlines of ideal (potential) flow around the
  * sphere — they part around it and close behind it, with no wake or trail.
@@ -101,28 +101,28 @@ export default async function create(ctx) {
   const vao = gl.createVertexArray();
   const DRAW2 = [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1];
 
-  /** @typedef {{ tex: WebGLTexture, fbo: WebGLFramebuffer, one: boolean }} Target */
-  /** @param {boolean} one R16F (else RGBA16F) @returns {Target} */
-  function target(one) {
+  /** @typedef {{ tex: WebGLTexture, fbo: WebGLFramebuffer, ch: 1 | 2 | 4 }} Target */
+  /** @param {1 | 2 | 4} ch R16F, RG16F (velocity) or RGBA16F @returns {Target} */
+  function target(ch) {
     const tex = /** @type {WebGLTexture} */ (gl.createTexture());
     const fbo = /** @type {WebGLFramebuffer} */ (gl.createFramebuffer());
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    const f = one ? gl.NEAREST : gl.LINEAR;
+    const f = ch === 1 ? gl.NEAREST : gl.LINEAR;
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, f);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, f);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return { tex, fbo, one };
+    return { tex, fbo, ch };
   }
-  const vel = [target(false), target(false)];
-  const scal = [target(false), target(false)];
-  const vf = target(false);
-  const sf = target(false);
-  const vb = target(false);
-  const sb = target(false);
-  const curl = target(true);
-  const div = target(true);
-  const pres = [target(true), target(true)];
+  const vel = [target(2), target(2)];
+  const scal = [target(4), target(4)];
+  const vf = target(2);
+  const sf = target(4);
+  const vb = target(2);
+  const sb = target(4);
+  const curl = target(1);
+  const div = target(1);
+  const pres = [target(1), target(1)];
   const singles = [...vel, ...scal, vf, sf, vb, sb, curl, div, ...pres];
   // Two-target framebuffers (velocity + scalars written together).
   const mrt = () => /** @type {WebGLFramebuffer} */ (gl.createFramebuffer());
@@ -142,7 +142,8 @@ export default async function create(ctx) {
   /** Allocate a target's storage and clear it. @param {Target} t @param {number} r */
   function alloc(t, r) {
     gl.bindTexture(gl.TEXTURE_2D, t.tex);
-    if (t.one) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, sw, sh, 0, gl.RED, gl.HALF_FLOAT, null);
+    if (t.ch === 1) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, sw, sh, 0, gl.RED, gl.HALF_FLOAT, null);
+    else if (t.ch === 2) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, sw, sh, 0, gl.RG, gl.HALF_FLOAT, null);
     else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, sw, sh, 0, gl.RGBA, gl.HALF_FLOAT, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
@@ -158,8 +159,8 @@ export default async function create(ctx) {
   }
 
   // Resize: carry the flow over into the new grid (same place in screen heights).
-  const keepV = target(false);
-  const keepS = target(false);
+  const keepV = target(2);
+  const keepS = target(4);
   function resize() {
     if (!half) return;
     const g = simGrid(ctx.size.width, ctx.size.height, Number(ctx.params.detail), FLOW_ANGLE);

@@ -147,3 +147,23 @@ describe("laminar GL calls", () => {
     });
   });
 });
+
+describe("laminar sim targets", () => {
+  it("keeps velocity in RG16F and the scalars in RGBA16F", async () => {
+    const s = await setup();
+    frame(s);
+    const seen = new Set();
+    replay(s, ({ program, units, formats }) => {
+      const fmt = (/** @type {number} */ u) => s.name(formats.get(units[u]) ?? 0);
+      if (program === "correct") {
+        expect([0, 2, 4].map(fmt)).toEqual(["RG16F", "RG16F", "RG16F"]);
+        expect([1, 3, 5].map(fmt)).toEqual(["RGBA16F", "RGBA16F", "RGBA16F"]);
+        expect(fmt(6)).toBe("R16F");
+      }
+      if (program === "composite") expect(fmt(0)).toBe("RGBA16F");
+      seen.add(program);
+    });
+    expect(seen).toContain("correct");
+    expect(seen).toContain("composite");
+  });
+});
