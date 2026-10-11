@@ -10,6 +10,7 @@ import pytest
 import pytest_asyncio
 
 from tests.test_server_support import FakeRegistry, raw_request
+from tidalviz.server.bootstrap import THREE_VERSION
 from tidalviz.server.plugin_server import PluginServer
 
 ENTRY = {"id": "bars", "name": "Bars", "entry": "main.js", "renderer": "2d"}
@@ -146,9 +147,51 @@ async def test_sdk_and_three(http: aiohttp.ClientSession) -> None:
     async with http.get("/sdk/sdk.js") as r:
         assert r.status == 200
         assert await r.text() == "export function boot(){}"
-    async with http.get("/lib/three/three.module.js") as r:
+    for path in (f"/lib/three/{THREE_VERSION}/three.module.js", "/lib/three/three.module.js"):
+        async with http.get(path) as r:
+            assert r.status == 200
+            assert r.content_type == "text/javascript"
+    async with http.get("/lib/three/0.0.1/three.module.js") as r:
+        assert r.status == 404
+
+
+IMMUTABLE = "max-age=31536000, immutable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "cache"),
+    [
+        ("/r/builtin/main.js", "no-cache"),
+        ("/lib/three/three.module.js", "no-cache"),
+        (f"/lib/three/{THREE_VERSION}/three.module.js", IMMUTABLE),
+        ("/sdk/sdk.js", IMMUTABLE),
+    ],
+)
+async def test_static_files_carry_validators_and_revalidate(
+    http: aiohttp.ClientSession, server: PluginServer, path: str, cache: str
+) -> None:
+    async with http.get(path) as r:
         assert r.status == 200
-        assert r.content_type == "text/javascript"
+        assert r.headers["Cache-Control"] == cache
+        etag, modified = r.headers["ETag"], r.headers["Last-Modified"]
+    for conditional in ({"If-None-Match": etag}, {"If-Modified-Since": modified}):
+        async with http.get(path, headers=conditional) as r:
+            assert r.status == 304
+            assert await r.read() == b""
+            assert_plugin_headers(r.headers, server.origin)
+
+
+@pytest.mark.asyncio
+async def test_sdk_revalidates_in_dev_mode(registry: FakeRegistry, web_dir: Path) -> None:
+    srv = PluginServer(registry, web_dir=web_dir, dev=True)
+    await srv.start()
+    try:
+        async with aiohttp.ClientSession(base_url=srv.origin) as http, http.get("/sdk/sdk.js") as r:
+            assert r.status == 200
+            assert r.headers["Cache-Control"] == "no-cache"
+    finally:
+        await srv.stop()
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,5 @@
 """Shared mechanics of the two loopback servers: binding, Host checks, response headers."""
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -10,6 +9,8 @@ from tidalviz.server.mime import content_type_for
 from tidalviz.server.paths import resolve_under
 
 HOST = "127.0.0.1"
+NO_CACHE = "no-cache"
+IMMUTABLE = "max-age=31536000, immutable"
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 
 
@@ -83,13 +84,12 @@ def raw_tail(request: web.Request, prefix_segments: int) -> str:
     return parts[prefix_segments + 1] if len(parts) > prefix_segments + 1 else ""
 
 
-async def file_response(base: Path, raw: str) -> web.Response:
-    """Serve ``raw`` (percent-encoded, relative) from ``base``, or raise 404."""
+def file_response(base: Path, raw: str, *, cache: str = NO_CACHE) -> web.FileResponse:
+    """Serve ``raw`` (percent-encoded, relative) from ``base`` with ETag and Last-Modified (so
+    revalidation gets a 304), or raise 404."""
     path = resolve_under(base, raw)
     if path is None:
         raise web.HTTPNotFound()
-    try:
-        body = await asyncio.to_thread(path.read_bytes)
-    except OSError:
-        raise web.HTTPNotFound() from None
-    return web.Response(body=body, headers={"Content-Type": content_type_for(path)})
+    return web.FileResponse(
+        path, headers={"Content-Type": content_type_for(path), "Cache-Control": cache}
+    )

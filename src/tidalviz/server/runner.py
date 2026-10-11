@@ -48,7 +48,7 @@ class HostServers:
         )
         self._web_dir = web_dir
         self._dev = dev
-        self.plugin_server = PluginServer(registry, web_dir=web_dir)
+        self.plugin_server = PluginServer(registry, web_dir=web_dir, dev=dev)
         self.shell_server: ShellServer | None = None
         self._watchdog_interval = min(0.25, hang_after / 4)
 

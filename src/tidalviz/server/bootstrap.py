@@ -13,8 +13,10 @@ _SCRIPT_ESCAPES = {
     0x2029: "\\u2029",
 }
 
+THREE_VERSION = "0.186.1"  # web/vendor/three/VERSION, written by tools/vendor_three.py
+_THREE_BASE = f"/lib/three/{THREE_VERSION}/"
 _THREE_IMPORT_MAP = {
-    "imports": {"three": "/lib/three/three.module.js", "three/addons/": "/lib/three/addons/"}
+    "imports": {"three": _THREE_BASE + "three.module.js", "three/addons/": _THREE_BASE + "addons/"}
 }
 
 

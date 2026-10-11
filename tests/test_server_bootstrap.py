@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from tidalviz.server.bootstrap import bootstrap_html, script_json
+from tidalviz.server.bootstrap import THREE_VERSION, bootstrap_html, script_json
 
 HOSTILE = "</script><script>alert(1)</script>&amp;<!--  "
 
@@ -53,7 +53,10 @@ def test_import_map_only_for_three() -> None:
     m = re.search(r'<script type="importmap"[^>]*>(.*?)</script>', three)
     assert m is not None
     assert json.loads(m.group(1)) == {
-        "imports": {"three": "/lib/three/three.module.js", "three/addons/": "/lib/three/addons/"}
+        "imports": {
+            "three": f"/lib/three/{THREE_VERSION}/three.module.js",
+            "three/addons/": f"/lib/three/{THREE_VERSION}/addons/",
+        }
     }
 
 

@@ -36,7 +36,7 @@ export function createHud(el) {
       row("shell", "Shell"),
       row("latency", "Audio latency p95"),
       row("dropped", "Dropped audio frames"),
-      row("cpu", "Host CPU"),
+      row("cpu", "Host CPU (incl. WebKit UI)"),
     ),
   );
   el.hidden = true;

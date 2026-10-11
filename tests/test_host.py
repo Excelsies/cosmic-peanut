@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sys
+import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -276,6 +277,94 @@ async def test_set_source_switches_capture_and_persists(host: Host, http):
 
 
 @pytest.mark.asyncio
+async def test_saved_app_source_that_is_gone_falls_back_to_system_audio(
+    tmp_path: Path, window: FakeWindow, http, monkeypatch: pytest.MonkeyPatch
+):
+    from tidalviz import host as host_module
+    from tidalviz.capture import SyntheticSource
+    from tidalviz.settings import Settings
+
+    root = tmp_path / "home"
+    Settings(root / "settings.json").update({"source": "app:999999"})
+    monkeypatch.setattr(host_module, "list_audio_apps", lambda: [])
+    # Stands in for system capture so the test doesn't spawn pw-record / a process tap.
+    system = SyntheticSource("silence")
+    monkeypatch.setattr(host_module, "system_source", lambda: system)
+    h = Host(root=root, builtin_dirs=BUILTINS, window=window)
+    await h.start()
+    try:
+        assert h.pipeline is not None and h.pipeline.source is system
+        shell = await connect(h, http)
+        hello = await shell.next_json("hello")
+        assert hello["activeSource"] == "system"
+        status = await shell.next_json("status")
+        assert status["level"] == "warn" and "app:999999" in status["text"]
+    finally:
+        await h.stop()
+
+
+@pytest.fixture
+def player(monkeypatch: pytest.MonkeyPatch) -> list[threading.Thread]:
+    """One audio app; records the thread of each listing. Its capture is a synthetic stand-in."""
+    from tidalviz import host as host_module
+    from tidalviz.capture import AudioApp, SyntheticSource
+
+    threads: list[threading.Thread] = []
+
+    def list_audio_apps() -> list[AudioApp]:
+        threads.append(threading.current_thread())
+        return [AudioApp(id="app:4242", name="Player", pid=4242)]
+
+    monkeypatch.setattr(host_module, "list_audio_apps", list_audio_apps)
+    monkeypatch.setattr(host_module, "app_source", lambda app: SyntheticSource("click120"))
+    return threads
+
+
+@pytest.mark.asyncio
+async def test_audio_apps_are_listed_off_the_loop_once_per_hello_and_switch(
+    host: Host, http, player: list[threading.Thread]
+):
+    shell = await connect(host, http)
+    hello = await shell.next_json("hello")
+    assert {"id": "app:4242", "name": "Player"} in hello["sources"]
+    await shell.send({"type": "setSource", "id": "app:4242"})
+    msg = await shell.next_json("sources")
+    assert msg["active"] == "app:4242" and {"id": "app:4242", "name": "Player"} in msg["sources"]
+    assert getattr(host.pipeline.source, "kind", None) == "click120"
+    assert len(player) == 2  # pw-dump once for hello, once for the switch
+    assert threading.current_thread() not in player
+
+
+@pytest.mark.asyncio
+async def test_the_last_requested_source_wins_when_listings_finish_out_of_order(
+    host: Host, http, monkeypatch: pytest.MonkeyPatch
+):
+    from tidalviz import host as host_module
+
+    release = threading.Event()
+    calls = 0
+
+    def list_audio_apps() -> list[Any]:
+        nonlocal calls
+        calls += 1
+        if calls == 2:  # the first switch's listing finishes after the second's
+            release.wait(2)
+        return []
+
+    monkeypatch.setattr(host_module, "list_audio_apps", list_audio_apps)
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await shell.send({"type": "setSource", "id": "synthetic:sine1k"})
+    await asyncio.sleep(0.05)
+    await shell.send({"type": "setSource", "id": "synthetic:click120"})
+    assert (await shell.next_json("sources"))["active"] == "synthetic:click120"
+    release.set()
+    await asyncio.sleep(0.1)
+    assert host.settings.data["source"] == "synthetic:click120"
+    assert getattr(host.pipeline.source, "kind", None) == "click120"
+
+
+@pytest.mark.asyncio
 async def test_unknown_source_is_rejected_with_a_status(host: Host, http):
     shell = await connect(host, http)
     await shell.next_json("hello")
@@ -331,6 +420,21 @@ async def test_stats_are_broadcast_with_onset_latency(tmp_path: Path, window: Fa
         assert 0 <= stats["latencyMsP95"] < 50
     finally:
         await h.stop()
+
+
+@pytest.mark.asyncio
+async def test_an_onset_carried_past_a_dropped_frame_is_still_timed(host: Host):
+    from tests.test_hub import FakeWs, frame, settle
+    from tidalviz.transport.frame import FLAG_ONSET
+
+    slow = FakeWs(gated=True)
+    host.servers.hub.add(slow)
+    for f in (frame(1), frame(2, flags=FLAG_ONSET), frame(3)):
+        host._publish(f)
+        await settle()
+    assert [i for i, _ in host._onsets] == [2, 3]  # frame 3 reached the shell flagged
+    slow.gate.set()
+    await host.servers.hub.remove(slow)
 
 
 # --- install flow (local fixture repos; no network) -----------------------------------------

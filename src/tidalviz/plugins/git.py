@@ -13,17 +13,16 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import urllib3
-from dulwich.client import GitClient, LocalGitClient, get_transport_and_path
-from dulwich.errors import NotGitRepository
-from dulwich.object_store import iter_tree_contents, peel_sha
-from dulwich.objects import S_ISGITLINK, Blob, Commit, ObjectID
-from dulwich.refs import Ref
-from dulwich.repo import Repo
+# dulwich and urllib3 load on first fetch, not at app launch (~25 ms, ~6 MB).
+if TYPE_CHECKING:
+    from dulwich.client import GitClient
+    from dulwich.objects import Commit, ObjectID
+    from dulwich.refs import Ref
+    from dulwich.repo import Repo
 
-Transport = Callable[[str], tuple[GitClient, str]]
+type Transport = Callable[[str], tuple[GitClient, str]]
 """Maps a repo URL to a dulwich client and the path to pass it (injectable for tests)."""
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -61,6 +60,9 @@ class FetchResult:
 
 def default_transport(timeout_s: float = 60.0) -> Transport:
     """HTTPS via urllib3 with connect/read timeouts."""
+    import urllib3
+    from dulwich.client import get_transport_and_path
+
     pool = urllib3.PoolManager(timeout=urllib3.Timeout(connect=15.0, read=timeout_s))
 
     def transport(url: str) -> tuple[GitClient, str]:
@@ -71,6 +73,7 @@ def default_transport(timeout_s: float = 60.0) -> Transport:
 
 def local_transport(repos: Mapping[str, Path]) -> Transport:
     """Serve the given URLs from local repos (tests, fixtures). Unknown URLs fail to fetch."""
+    from dulwich.client import LocalGitClient
 
     def transport(url: str) -> tuple[GitClient, str]:
         path = repos.get(url)
@@ -116,6 +119,8 @@ def _run_with_timeout[T](fn: Callable[[], T], timeout_s: float, what: str) -> T:
 def _resolve_ref(
     refs: Mapping[Ref, ObjectID | None], symrefs: Mapping[Ref, Ref], ref: str | None
 ) -> bytes:
+    from dulwich.refs import Ref
+
     if ref is None:
         target = symrefs.get(Ref(b"HEAD"))
         sha = refs.get(target) if target else refs.get(Ref(b"HEAD"))
@@ -198,6 +203,11 @@ class GitFetcher:
             shutil.rmtree(temp, ignore_errors=True)
 
     def _fetch_objects(self, url: str, ref: str | None, dest: Path) -> tuple[Repo, Commit, int]:
+        from dulwich.errors import NotGitRepository
+        from dulwich.object_store import peel_sha
+        from dulwich.objects import Commit, ObjectID
+        from dulwich.repo import Repo
+
         dest.mkdir(parents=True)
         target = Repo.init_bare(str(dest))
         limit = self.limits.max_bytes
@@ -251,6 +261,9 @@ class GitFetcher:
             raise
 
     def _checkout(self, repo: Repo, commit: Commit, dest: Path, deadline: float) -> list[str]:
+        from dulwich.object_store import iter_tree_contents
+        from dulwich.objects import S_ISGITLINK, Blob
+
         warnings: list[str] = []
         links: list[tuple[str, str]] = []
         files = total = 0

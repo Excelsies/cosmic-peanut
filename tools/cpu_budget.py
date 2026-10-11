@@ -120,7 +120,8 @@ async def _client(url: str, origin: str, seconds: float) -> None:
 
     frames = silent = 0
     nbytes = 0
-    async with aiohttp.ClientSession() as s, s.ws_connect(url, origin=origin) as ws:
+    # compress=15: WebKitGTK's libsoup offers permessage-deflate, so make the same offer.
+    async with aiohttp.ClientSession() as s, s.ws_connect(url, origin=origin, compress=15) as ws:
         loop = asyncio.get_running_loop()
         end = loop.time() + seconds
         next_beat = 0.0
