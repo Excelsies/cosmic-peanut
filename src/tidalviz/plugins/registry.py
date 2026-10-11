@@ -110,7 +110,7 @@ class PluginRegistry:
     ) -> None:
         self.paths = AppPaths(root)
         self._file = RegistryFile(self.paths.registry)
-        self._fetcher = fetcher or GitFetcher(self.paths.cache)
+        self._fetcher = fetcher
         self._clock = clock
         self._lock = threading.RLock()
         self._pending: dict[str, PendingInstall] = {}
@@ -124,6 +124,14 @@ class PluginRegistry:
         for folder in self._data.dev_folders:
             path = Path(folder)
             self._load(_Repo(key=dev_key(path), dir=path, kind="dev"))
+
+    @property
+    def fetcher(self) -> GitFetcher:
+        """Created on first install or update check, so launch doesn't load dulwich."""
+        with self._lock:
+            if self._fetcher is None:
+                self._fetcher = GitFetcher(self.paths.cache)
+            return self._fetcher
 
     # ---- read API used by the server -------------------------------------------------------
 
@@ -275,7 +283,7 @@ class PluginRegistry:
         results: dict[str, tuple[str, str]] = {}
         for key, url, ref in due:
             try:
-                results[key] = self._fetcher.remote_head(url, ref)
+                results[key] = self.fetcher.remote_head(url, ref)
             except Exception as e:
                 log.info("update check for %s failed: %s", key, e)
         with self._lock:
@@ -390,7 +398,7 @@ class PluginRegistry:
     # ---- internals ------------------------------------------------------------------------
 
     def _prepare(self, spec: RepoSpec) -> PendingInstall:
-        result = self._fetcher.fetch(spec.url, spec.ref)
+        result = self.fetcher.fetch(spec.url, spec.ref)
         loaded = load_manifest(result.checkout)
         if loaded.errors or loaded.manifest is None:
             result.discard()

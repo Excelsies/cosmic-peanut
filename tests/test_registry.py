@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -443,3 +445,28 @@ def test_dev_folders_listed(tmp_path: Path, root: Path, origin: Path) -> None:
         "errors": [],
     }
     assert os.path.isabs(reg.repos()[0]["path"])
+
+
+_GIT_IMPORT_PROBE = """
+import sys
+from pathlib import Path
+
+import tidalviz.host
+from tidalviz.plugins import GitFetcher, PluginRegistry
+
+loaded = lambda: sorted(m for m in ("dulwich", "urllib3") if m in sys.modules)
+registry = PluginRegistry(Path(sys.argv[1]))
+print(loaded())
+assert isinstance(registry.fetcher, GitFetcher) and registry.fetcher is registry.fetcher
+print(loaded())
+"""
+
+
+def test_dulwich_and_urllib3_load_only_when_git_is_first_needed(tmp_path: Path) -> None:
+    out = subprocess.run(
+        [sys.executable, "-c", _GIT_IMPORT_PROBE, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.splitlines() == ["[]", "['dulwich', 'urllib3']"]
