@@ -6,6 +6,8 @@ PipeWire daemon is replaced. ``-m live`` tests (tests/test_live_audio.py) use th
 """
 
 import json
+import logging
+import shutil
 import stat
 import sys
 import threading
@@ -20,7 +22,9 @@ import pytest
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="PipeWire capture is Linux-only")
 
 if sys.platform == "linux":
+    from tidalviz.capture import pipewire_source
     from tidalviz.capture.pipewire_source import (
+        BLOCK,
         FIRST_BLOCK_TIMEOUT_S,
         STALL_TIMEOUT_S,
         AudioApp,
@@ -38,6 +42,8 @@ import numpy as np
 
 with open(os.environ["FAKE_PW_ARGV"], "w") as f:
     json.dump(sys.argv[1:], f)
+with open(os.environ["FAKE_PW_ENV"], "w") as f:
+    f.write(os.environ.get("_STDBUF_O", ""))  # set by stdbuf -o0
 blocks = int(os.environ.get("FAKE_PW_BLOCKS", "0"))  # 0 = until killed
 stall = os.environ.get("FAKE_PW_STALL")  # "blocks" or "mid": stay alive but stop writing
 chunk = int(os.environ.get("FAKE_PW_CHUNK", "4096"))
@@ -69,11 +75,16 @@ def fake_pw(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     script.write_text(FAKE)
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("FAKE_PW_ARGV", str(tmp_path / "argv.json"))
+    monkeypatch.setenv("FAKE_PW_ENV", str(tmp_path / "stdbuf_o"))
     return str(script)
 
 
 def argv_of(tmp_path: Path) -> list[str]:
     return json.loads((tmp_path / "argv.json").read_text())
+
+
+def stdbuf_o_of(tmp_path: Path) -> str:
+    return (tmp_path / "stdbuf_o").read_text()
 
 
 def collect(n: int) -> tuple[list[tuple[Any, float]], threading.Event, Any]:
@@ -94,7 +105,7 @@ def test_record_args_for_the_system_follow_the_default_output_monitor():
         "-P",
         "{ stream.capture.sink=true }",
         "--latency",
-        "256",
+        "512",
         "--rate",
         "48000",
         "--channels",
@@ -154,13 +165,34 @@ def test_blocks_stay_aligned_when_the_pipe_delivers_odd_sized_chunks(
         np.testing.assert_array_equal(x.ravel(), np.arange(1024) + i * 1024)
 
 
-def test_the_source_runs_the_program_with_the_system_arguments(fake_pw: str, tmp_path: Path):
+@pytest.mark.skipif(shutil.which("stdbuf") is None, reason="needs coreutils stdbuf")
+def test_the_source_runs_the_program_unbuffered_with_the_system_arguments(
+    fake_pw: str, tmp_path: Path
+):
     _, enough, on_samples = collect(1)
     src = PipeWireSystemSource(program=fake_pw)
     src.start(on_samples)
     assert enough.wait(5.0)
     src.stop()
     assert argv_of(tmp_path) == record_args(None)
+    assert stdbuf_o_of(tmp_path) == "0"  # one write per block, not held in a stdio buffer
+
+
+def test_without_stdbuf_the_program_runs_directly_at_half_a_block_and_warns_once(
+    fake_pw: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    monkeypatch.setattr(pipewire_source, "_warned_no_stdbuf", False)
+    caplog.set_level(logging.WARNING, logger=pipewire_source.__name__)
+    for _ in range(2):
+        _, enough, on_samples = collect(1)
+        src = PipeWireSystemSource(program=fake_pw)
+        src.start(on_samples)
+        assert enough.wait(5.0)
+        src.stop()
+    assert argv_of(tmp_path) == record_args(None, latency=BLOCK // 2)
+    assert stdbuf_o_of(tmp_path) == ""
+    assert [r.message for r in caplog.records] == ["stdbuf not found; capturing at --latency 256"]
 
 
 def test_stop_ends_the_process_and_is_not_a_failure(fake_pw: str):
