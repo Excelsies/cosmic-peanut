@@ -95,6 +95,11 @@ async def test_shell_files(http: aiohttp.ClientSession, server: ShellServer) -> 
     async with http.get("/shell/app.js") as r:
         assert r.status == 200
         assert r.content_type == "text/javascript"
+        assert r.headers["Cache-Control"] == "no-cache"
+        assert_shell_headers(r.headers, server)
+        etag = r.headers["ETag"]
+    async with http.get("/shell/app.js", headers={"If-None-Match": etag}) as r:
+        assert r.status == 304
         assert_shell_headers(r.headers, server)
 
 

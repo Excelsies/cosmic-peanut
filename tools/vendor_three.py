@@ -5,8 +5,8 @@ uv run python -m tools.vendor_three
 Downloads the npm tarball with urllib (no Node needed), checks it against the registry's sha512
 `dist.integrity`, and writes a trimmed tree matching the plugin import map (docs/protocols.md §3):
 
-    three          -> /lib/three/three.module.js   (+ three.core.js, which it imports)
-    three/addons/  -> /lib/three/addons/           (examples/jsm, minus what can't load or is heavy)
+    three          -> /lib/three/<version>/three.module.js  (+ three.core.js, which it imports)
+    three/addons/  -> /lib/three/<version>/addons/  (examples/jsm minus what can't load or is heavy)
 
 The import map maps only `three` and `three/addons/`, so addons that import `three/webgpu`,
 `three/tsl` or a URL can't load in a plugin and are dropped, along with anything that imports a
@@ -24,7 +24,8 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-PINNED_VERSION = "0.186.1"
+from tidalviz.server.bootstrap import THREE_VERSION as PINNED_VERSION
+
 SIZE_CAP = 8 * 1024 * 1024
 DEST = Path(__file__).resolve().parent.parent / "web" / "vendor" / "three"
 REGISTRY = "https://registry.npmjs.org/three/"

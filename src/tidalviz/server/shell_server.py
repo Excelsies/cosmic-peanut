@@ -51,14 +51,14 @@ class ShellServer(LocalServer):
         if not token_matches(request.query.get("token"), self._token):
             raise web.HTTPForbidden()
 
-    async def _index(self, request: web.Request) -> web.Response:
-        return await file_response(self._shell_dir, "index.html")
+    async def _index(self, request: web.Request) -> web.StreamResponse:
+        return file_response(self._shell_dir, "index.html")
 
-    async def _shell_file(self, request: web.Request) -> web.Response:
+    async def _shell_file(self, request: web.Request) -> web.StreamResponse:
         tail = raw_tail(request, 1)
         if is_dev_only(tail):
             raise web.HTTPNotFound()
-        return await file_response(self._shell_dir, tail)
+        return file_response(self._shell_dir, tail)
 
     async def _config(self, request: web.Request) -> web.Response:
         self._require_token(request)
