@@ -3,13 +3,12 @@
  * Cosmic Peanut — each moment's waveform becomes a ring on an invisible sphere; rings drift from
  * the north pole to the south pole while the camera slowly orbits. `webgl2` renderer.
  *
- * All geometry is computed on the GPU from a static (j, i) vertex grid and an M × N R32F history
- * texture used as a circular buffer, so a frame is a few uniforms, at most a few one-row uploads,
- * and one drawElements call (plus a blit in Soft lines mode). The logic lives in ./lib (pure,
+ * All geometry is computed on the GPU from gl_VertexID / gl_InstanceID (point j, ring i) and an
+ * M × N R32F history texture used as a circular buffer, so a frame is a few uniforms, at most a few
+ * one-row uploads, and one drawArraysInstanced call (plus a blit in Soft lines mode). The logic lives in ./lib (pure,
  * tested); this file is the GL glue. frame() allocates nothing.
  */
 import { cameraDistance, createCamera, RADIUS } from "./lib/camera.js";
-import { buildGrid } from "./lib/geometry.js";
 import { createProgram } from "./lib/gl.js";
 import { createHistory } from "./lib/history.js";
 import { GENTLE, gentle } from "./lib/motion.js";
@@ -40,12 +39,8 @@ export default async function create(ctx) {
   const blit = createProgram(gl, blitVs, blitFs, "shaders/blit");
   const U = rings.u;
 
-  const vao = /** @type {WebGLVertexArrayObject} */ (gl.createVertexArray());
-  const blitVao = /** @type {WebGLVertexArrayObject} */ (gl.createVertexArray());
-  const vbo = gl.createBuffer();
-  const ibo = gl.createBuffer();
+  const vao = /** @type {WebGLVertexArrayObject} */ (gl.createVertexArray()); // no attributes
   const hist = gl.createTexture();
-  let indexCount = 0;
 
   const history = createHistory(M, densityRings(ctx.params.density), (row, ring) => {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, M, 1, gl.RED, gl.FLOAT, ring);
@@ -53,21 +48,10 @@ export default async function create(ctx) {
   const camera = createCamera();
   const pulse = createPulse();
 
-  /** Build the grid and a sentinel-filled history texture for the current density. */
+  /** Allocate a sentinel-filled history texture for the current density. */
   function allocate() {
-    const { verts, indices } = buildGrid(history.N, M);
-    indexCount = indices.length;
-    gl.bindVertexArray(vao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.UNSIGNED_SHORT, false, 0, 0); // read as float (j, i)
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
-    gl.bindVertexArray(null);
-
     gl.bindTexture(gl.TEXTURE_2D, hist);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, M, history.N, 0, gl.RED, gl.FLOAT, history.data);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, M, history.N, 0, gl.RED, gl.FLOAT, history.blank());
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   }
@@ -165,7 +149,7 @@ export default async function create(ctx) {
       gl.uniformMatrix4fv(U.uProj, false, camera.proj);
       gl.uniformMatrix4fv(U.uView, false, camera.view);
       gl.bindVertexArray(vao);
-      gl.drawElements(gl.LINE_STRIP, indexCount, gl.UNSIGNED_INT, 0);
+      gl.drawArraysInstanced(gl.LINE_STRIP, 0, M + 1, history.N);
       gl.disable(gl.BLEND);
 
       if (!direct) {
@@ -179,7 +163,6 @@ export default async function create(ctx) {
         gl.useProgram(blit.program);
         gl.bindTexture(gl.TEXTURE_2D, softTex);
         gl.uniform1i(blit.u.uSrc, 0);
-        gl.bindVertexArray(blitVao);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
       gl.bindVertexArray(null);
@@ -199,15 +182,12 @@ export default async function create(ctx) {
     },
 
     dispose() {
-      gl.deleteBuffer(vbo);
-      gl.deleteBuffer(ibo);
       gl.deleteTexture(hist);
       gl.deleteTexture(softTex);
       gl.deleteFramebuffer(softFbo);
       gl.deleteFramebuffer(msaaFbo);
       gl.deleteRenderbuffer(msaaRb);
       gl.deleteVertexArray(vao);
-      gl.deleteVertexArray(blitVao);
       gl.deleteProgram(rings.program);
       gl.deleteProgram(blit.program);
     },

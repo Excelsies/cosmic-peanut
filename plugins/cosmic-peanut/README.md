@@ -36,9 +36,9 @@ motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off t
   circular buffer, one `texSubImage2D` row per ring. Rings are pushed at a fixed N ÷ travel per
   second from a `dt` accumulator; the leftover fraction moves every ring continuously between
   pushes. Unwritten rows hold a sentinel (1e6) and are invisible.
-- **Geometry** (`geometry.js`, `shaders/rings.vert`): a static grid of (j, i) vertices drawn as
-  one `LINE_STRIP` `drawElements` call with primitive restart; the vertex shader places point j of
-  ring i at latitude π·age, radius (1 + amp·s)(1 + 0.06·p).
+- **Geometry** (`shaders/rings.vert`): one `drawArraysInstanced` call, a `LINE_STRIP` of M + 1
+  points per ring with no vertex or index buffers; the vertex shader places point j =
+  `gl_VertexID` of ring i = `gl_InstanceID` at latitude π·age, radius (1 + amp·s)(1 + 0.06·p).
 - **Color** (`shaders/rings.frag`): additive blending, cosine palette by age, depth cue from view
   depth, newest brightest, gain × √(240 ÷ N).
 - **Transparency**: the canvas is transparent and premultiplied. Each fragment outputs

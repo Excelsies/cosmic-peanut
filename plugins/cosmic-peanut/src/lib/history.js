@@ -26,8 +26,6 @@ export function createHistory(M, N, upload) {
     N,
     /** Row of the newest ring. */
     head: 0,
-    /** M × N texels (row-major, one ring per row), for the initial texture upload. */
-    data: new Float32Array(M * N).fill(SENTINEL),
     /** Leftover fraction of a push interval, 0–1 (the shader's `uFrac`). */
     get frac() {
       return clock.frac;
@@ -50,8 +48,15 @@ export function createHistory(M, N, upload) {
       return n;
     },
     /**
-     * Change the number of rings. Reallocates `data` filled with the sentinel and restarts the
-     * history, so the old rings vanish instead of flashing as flat circles.
+     * M × N sentinel texels (row-major, one ring per row) for the initial texture upload. A new
+     * array each call, so nothing holds the texels after the upload.
+     */
+    blank() {
+      return new Float32Array(M * h.N).fill(SENTINEL);
+    },
+    /**
+     * Change the number of rings and restart the history (the texture must then be reallocated
+     * from `blank()`), so the old rings vanish instead of flashing as flat circles.
      * @param {number} n rings
      * @returns {boolean} whether anything changed (the texture must then be reallocated)
      */
@@ -59,7 +64,6 @@ export function createHistory(M, N, upload) {
       if (n === h.N) return false;
       h.N = n;
       h.head = 0;
-      h.data = new Float32Array(M * n).fill(SENTINEL);
       clock.reset();
       return true;
     },

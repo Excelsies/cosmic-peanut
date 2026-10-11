@@ -162,4 +162,13 @@ describe("cosmic-peanut GL", () => {
       expect(softTextures(gl).at(-1)).toEqual([1280, 720]);
     }
   });
+
+  it("draws the rings as one instanced line strip each, with no vertex or index buffers", async () => {
+    const { gl, viz, setParams } = await setup();
+    const [rings] = frameDraws(gl, viz);
+    expect([rings.name, ...rings.args]).toEqual(["drawArraysInstanced", "LINE_STRIP", 0, 513, 240]);
+    setParams({ density: "dense" });
+    expect(frameDraws(gl, viz)[0].args).toEqual(["LINE_STRIP", 0, 513, 400]);
+    expect(gl.calls.filter((/** @type {any[]} */ c) => c[0] === "createBuffer" || c[0] === "bufferData")).toEqual([]);
+  });
 });

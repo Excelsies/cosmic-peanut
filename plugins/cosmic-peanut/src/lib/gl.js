@@ -20,8 +20,7 @@ function compile(gl, type, src, name) {
 }
 
 /**
- * Compile and link a program (attribute 0 bound to `aIdx`), returning it with its uniform
- * locations by name.
+ * Compile and link a program, returning it with its uniform locations by name.
  * @param {WebGL2RenderingContext} gl
  * @param {string} vs vertex source
  * @param {string} fs fragment source
@@ -33,7 +32,6 @@ export function createProgram(gl, vs, fs, name) {
   const f = compile(gl, gl.FRAGMENT_SHADER, fs, `${name}.frag`);
   gl.attachShader(p, v);
   gl.attachShader(p, f);
-  gl.bindAttribLocation(p, 0, "aIdx");
   gl.linkProgram(p);
   gl.deleteShader(v);
   gl.deleteShader(f);

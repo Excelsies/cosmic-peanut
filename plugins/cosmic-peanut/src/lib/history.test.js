@@ -15,9 +15,11 @@ function recorded(N) {
 describe("createHistory", () => {
   it("starts with every texel at the sentinel, so nothing is drawn at startup", () => {
     const { h } = recorded(240);
-    expect(h.data.length).toBe(512 * 240);
-    expect(h.data.every((v) => v === SENTINEL)).toBe(true);
+    const data = h.blank();
+    expect(data.length).toBe(512 * 240);
+    expect(data.every((v) => v === SENTINEL)).toBe(true);
     expect(SENTINEL).toBe(1e6);
+    expect(h).not.toHaveProperty("data"); // only the texture keeps the texels
   });
 
   it("uploads exactly the rows it pushes, advancing the head one row each, wrapping at N", () => {
@@ -39,8 +41,8 @@ describe("createHistory", () => {
     expect(h.N).toBe(400);
     expect(h.head).toBe(0);
     expect(h.frac).toBe(0);
-    expect(h.data.length).toBe(512 * 400);
-    expect(h.data.every((v) => v === SENTINEL)).toBe(true);
+    expect(h.blank().length).toBe(512 * 400);
+    expect(h.blank().every((v) => v === SENTINEL)).toBe(true);
     rows.length = 0;
     for (let f = 0; f < 60; f++) h.step(WAVE, 1 / 60, 7, 0.7);
     expect(rows[0]).toBe(1);
@@ -49,11 +51,10 @@ describe("createHistory", () => {
 
   it("keeps everything when the density is unchanged", () => {
     const { h } = recorded(240);
-    const data = h.data;
     h.step(WAVE, 0.1, 7, 0.7);
     const head = h.head;
     expect(h.setDensity(240)).toBe(false);
-    expect(h.data).toBe(data);
+    expect(h.N).toBe(240);
     expect(h.head).toBe(head);
   });
 });
