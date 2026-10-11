@@ -20,6 +20,10 @@ BUILTINS = [REPO / "plugins" / "builtin", REPO / "plugins" / "template"]
 class FakeWindow:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.hz = 60.0
+
+    def refresh_hz(self) -> float:
+        return self.hz
 
     def fullscreen(self) -> None:
         self.calls.append("fullscreen")
@@ -153,6 +157,16 @@ async def test_frames_stream_while_a_shell_is_connected(host: Host, http):
     await shell.next_json("hello")
     n = await shell.count_frames(1.0)
     assert 60 <= n <= 110  # ~94 frames/s from the synthetic source
+
+
+@pytest.mark.asyncio
+async def test_the_monitor_refresh_rate_follows_the_window(host: Host, window: FakeWindow, http):
+    shell = await connect(host, http)
+    assert (await shell.next_json("hello"))["refreshHz"] == 0  # not read yet
+    assert (await shell.next_json("display", timeout=2.5))["refreshHz"] == 60.0
+    window.hz = 30.0  # moved to a 30 Hz monitor
+    assert (await shell.next_json("display", timeout=2.5))["refreshHz"] == 30.0
+    assert (await (await connect(host, http)).next_json("hello"))["refreshHz"] == 30.0
 
 
 def perf(fps: float, *, throttled: bool = False) -> dict[str, Any]:

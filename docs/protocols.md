@@ -163,7 +163,7 @@ Host → shell:
 
 | type | Fields |
 | --- | --- |
-| `hello` | `version: 1`, `pluginOrigin`, `visualizers: VizInfo[]`, `repos: RepoInfo[]`, `settings`, `sources: SourceInfo[]`, `activeSource`, `active: key \| null`, `dev: bool` |
+| `hello` | `version: 1`, `pluginOrigin`, `visualizers: VizInfo[]`, `repos: RepoInfo[]`, `settings`, `sources: SourceInfo[]`, `activeSource`, `active: key \| null`, `dev: bool`, `refreshHz` (the window's monitor; 0 = unknown, e.g. macOS) |
 | `visualizers` | `visualizers: VizInfo[]`, `repos: RepoInfo[]` (registry changed) |
 | `reload` | `key` — dev folder changed; hot-reload if active |
 | `manifestError` | `repo`, `errors: {path, message}[]` |
@@ -175,6 +175,7 @@ Host → shell:
 | `installResult` | `id`, `ok`, `error?` |
 | `updates` | `repos: {repo, commit, message}[]` |
 | `disabled` | `key`, `reason` — hung/crashed plugin was disabled |
+| `display` | `refreshHz` — the window's monitor refresh rate changed (polled 1/s while a shell is connected) |
 
 `VizInfo = { key, repo, id, name, description, author, renderer, thumbnailUrl|null, params:
 ParamSpec[], values: ParamValues, disabled: bool, dev: bool, entryUrl, pageUrl }`
@@ -213,7 +214,7 @@ Shell → SDK (port):
 
 | Message | Notes |
 | --- | --- |
-| `{type:"tidalviz:init", params, quality, renderScaleMax, maxDpr, fpsCap, reduceFlashing, visible}` | Via `window.postMessage` with the port. `maxDpr`: auto/high = 0 (native), balanced 1.5, battery 1 (the SDK applies min(live `devicePixelRatio`, `maxDpr`) and re-sizes when the DPR changes); `fpsCap`: 0 = uncapped, battery = 30; `renderScaleMax`: 1 |
+| `{type:"tidalviz:init", params, quality, renderScaleMax, maxDpr, fpsCap, reduceFlashing, visible}` | Via `window.postMessage` with the port. `maxDpr`: auto/high = 0 (native), balanced 1.5, battery 1 (the SDK applies min(live `devicePixelRatio`, `maxDpr`) and re-sizes when the DPR changes); `fpsCap`: 0 = uncapped, battery = 30, and at most `refreshHz` when the monitor runs under 55 Hz (WebKitGTK paces rAF from a 60 Hz timer); `renderScaleMax`: 1 |
 | `ArrayBuffer` | A binary v1 frame, **transferred** (the shell keeps no reference). During a crossfade the second iframe gets a copy |
 | `{type:"params", changed}` | |
 | `{type:"settings", quality?, maxDpr?, fpsCap?, reduceFlashing?}` | |

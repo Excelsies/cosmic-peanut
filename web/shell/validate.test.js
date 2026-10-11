@@ -50,6 +50,7 @@ describe("parseHostMessage", () => {
         activeSource: "system",
         active: "builtin/bars",
         dev: true,
+        refreshHz: 29.97,
       }),
     );
     expect(msg?.type).toBe("hello");
@@ -63,6 +64,15 @@ describe("parseHostMessage", () => {
     expect(msg.settings.reduceFlashing).toBe(false);
     expect(msg.active).toBe("builtin/bars");
     expect(msg.dev).toBe(true);
+    expect(msg.refreshHz).toBe(29.97);
+  });
+
+  it("hello refreshHz is 0 (unknown) when missing or invalid", () => {
+    for (const refreshHz of [undefined, -1, "60", null]) {
+      const msg = parseHostMessage(JSON.stringify({ type: "hello", version: 1, pluginOrigin: "http://127.0.0.1:2",
+        visualizers: [], repos: [], settings: {}, sources: [], activeSource: null, active: null, dev: false, refreshHz }));
+      expect(msg?.type === "hello" && msg.refreshHz, `${refreshHz}`).toBe(0);
+    }
   });
 
   it("keeps the opacities in range: background 0 to 1, visual 0.1 to 1", () => {
@@ -107,6 +117,7 @@ describe("parseHostMessage", () => {
       { type: "installResult", id: "i1", ok: false, error: "nope" },
       { type: "updates", repos: [{ repo: "r", commit: "c", message: "m" }] },
       { type: "disabled", key: "k", reason: "hung" },
+      { type: "display", refreshHz: 30 },
     ];
     for (const m of ok) expect(parseHostMessage(JSON.stringify(m))).toEqual(m);
     const bad = [
@@ -116,6 +127,8 @@ describe("parseHostMessage", () => {
       { type: "installPrompt", id: "i1", url: 3, commit: "abc", visualizers: [] },
       { type: "installResult", id: "i1" },
       { type: "disabled", key: "k" },
+      { type: "display", refreshHz: -30 },
+      { type: "display" },
     ];
     for (const m of bad) expect(parseHostMessage(JSON.stringify(m))).toBeNull();
   });

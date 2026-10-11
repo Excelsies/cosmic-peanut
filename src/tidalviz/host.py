@@ -69,6 +69,7 @@ class WindowControl(Protocol):
     def click_plugin(self) -> None: ...
     def recover_webview(self) -> None: ...
     def pick_folder(self) -> str | None: ...
+    def refresh_hz(self) -> float: ...  # the window's monitor, 0 = unknown
 
 
 def open_url(url: str) -> None:
@@ -128,6 +129,7 @@ class Host:
         self._last_click = -CLICK_INTERVAL_S
         self._last_recover = -RECOVER_INTERVAL_S
         self._throttled: bool | None = None
+        self._refresh_hz = 0.0
         self._tasks: set[asyncio.Future[Any]] = set()
         self._notices: list[dict[str, Any]] = []  # sent to the next shell after its hello
         # Onset frames published (index, host time) — appended on the analysis thread; deque
@@ -252,6 +254,7 @@ class Host:
             "activeSource": s["source"],
             "active": s["active"],
             "dev": self.dev,
+            "refreshHz": self._refresh_hz,
         }
 
     # --- control channel ------------------------------------------------------------------
@@ -418,10 +421,18 @@ class Host:
         while True:
             await asyncio.sleep(STATS_INTERVAL_S)
             if self.servers.control.client_count:
+                await self._follow_refresh_rate()
                 stats = self.stats()
                 if self.bench is not None:
                     self.bench.add(stats)
                 await self.servers.control.broadcast_json(stats)
+
+    async def _follow_refresh_rate(self) -> None:
+        """The window may have moved to another monitor; the shell caps fps on a slow one."""
+        hz = self.window.refresh_hz()
+        if hz != self._refresh_hz:
+            self._refresh_hz = hz
+            await self.servers.control.broadcast_json({"type": "display", "refreshHz": hz})
 
     # --- installs (blocking registry work runs in a thread) --------------------------------
 

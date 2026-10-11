@@ -83,6 +83,19 @@ describe("app: hello and selection", () => {
     expect(host.deps.settings).toMatchObject({ quality: "auto", maxDpr: 0, fpsCap: 0, reduceFlashing: true });
   });
 
+  it("caps fps at a slow display's refresh rate, following the window across monitors", () => {
+    const { app, host } = setup();
+    app.handle(hello({ refreshHz: 30 }));
+    expect(host.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({ quality: "auto", fpsCap: 30 }));
+    app.handle({ type: "display", refreshHz: 59.95 });
+    expect(host.setSettings).toHaveBeenLastCalledWith({ fpsCap: 0 });
+    app.handle({ type: "display", refreshHz: 30 });
+    expect(host.setSettings).toHaveBeenLastCalledWith({ fpsCap: 30 });
+    host.setSettings.mockClear();
+    app.handle({ type: "display", refreshHz: 30 });
+    expect(host.setSettings).not.toHaveBeenCalled();
+  });
+
   it("with no active visualizer picks the first enabled one and persists it", () => {
     const { app, host, last } = setup();
     app.handle(hello({ active: null, visualizers: [{ ...A, disabled: true }, B] }));

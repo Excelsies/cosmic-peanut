@@ -24,7 +24,8 @@
  *   droppedFrames: number; latencyMsP95?: number }} Stats
  *
  * @typedef {{ type: "hello"; version: number; pluginOrigin: string; visualizers: VizInfo[]; repos: RepoInfo[];
- *     settings: Settings; sources: SourceInfo[]; activeSource: string | null; active: string | null; dev: boolean }
+ *     settings: Settings; sources: SourceInfo[]; activeSource: string | null; active: string | null; dev: boolean;
+ *     refreshHz: number }
  *   | { type: "visualizers"; visualizers: VizInfo[]; repos: RepoInfo[] }
  *   | { type: "reload"; key: string }
  *   | { type: "manifestError"; repo: string; errors: { path: string; message: string }[] }
@@ -35,7 +36,8 @@
  *   | { type: "installPrompt"; id: string; url: string; commit: string; visualizers: { id: string; name: string }[] }
  *   | { type: "installResult"; id: string; ok: boolean; error?: string }
  *   | { type: "updates"; repos: { repo: string; commit: string; message: string }[] }
- *   | { type: "disabled"; key: string; reason: string }} HostMessage
+ *   | { type: "disabled"; key: string; reason: string }
+ *   | { type: "display"; refreshHz: number }} HostMessage
  *
  * @typedef {{ fps: number; frameMsP50: number; frameMsP99: number; pluginMsP50: number;
  *   renderScale: number; dropped: number }} PluginPerf
@@ -214,6 +216,7 @@ export function parseHostMessage(text) {
         activeSource: isStr(m.activeSource) ? m.activeSource : null,
         active: isStr(m.active) ? m.active : null,
         dev: m.dev === true,
+        refreshHz: isNum(m.refreshHz) && m.refreshHz >= 0 ? m.refreshHz : 0,
       };
     }
     case "visualizers": {
@@ -278,6 +281,8 @@ export function parseHostMessage(text) {
     }
     case "disabled":
       return isStr(m.key) && isStr(m.reason) ? { type: "disabled", key: m.key, reason: m.reason } : null;
+    case "display":
+      return isNum(m.refreshHz) && m.refreshHz >= 0 ? { type: "display", refreshHz: m.refreshHz } : null;
     default:
       return null;
   }

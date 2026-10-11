@@ -70,6 +70,7 @@ export function createApp(deps) {
     root.style.setProperty("--visual-opacity", String(settings.transparent ? settings.visualOpacity : 1));
   };
   let dev = false;
+  let refreshHz = 0; // the window's monitor; 0 = unknown
   let overlaysHidden = false;
   /** @type {PanelName | null} */ let openPanel = null;
   /** @type {Element | null} */ let returnFocus = null;
@@ -223,7 +224,7 @@ export function createApp(deps) {
   // ---- plugin host ---------------------------------------------------------------------------
   const pluginHost = (deps.createPluginHost ?? createPluginHost)({
     container: vizLayer,
-    settings: { quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality) },
+    settings: { quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, refreshHz) },
     visible: () => doc.visibilityState !== "hidden",
     onEvent,
   });
@@ -401,7 +402,7 @@ export function createApp(deps) {
   function setQuality(q) {
     settings.quality = q;
     send({ type: "settings", quality: q });
-    pluginHost.setSettings({ quality: q, ...qualityProfile(q) });
+    pluginHost.setSettings({ quality: q, ...qualityProfile(q, refreshHz) });
   }
 
   function armCycle() {
@@ -660,9 +661,10 @@ export function createApp(deps) {
         sources = msg.sources;
         activeSource = msg.activeSource;
         dev = msg.dev;
+        refreshHz = msg.refreshHz;
         for (const v of visualizers) if (!values.has(v.key)) values.set(v.key, v.values);
         Object.assign(settings, msg.settings);
-        pluginHost.setSettings({ quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality) });
+        pluginHost.setSettings({ quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, refreshHz) });
         hud.setVisible(settings.hudVisible);
         applyTransparent();
         applyOpacity();
@@ -747,6 +749,13 @@ export function createApp(deps) {
         setStatus("warn", `${name} was disabled: ${msg.reason}`);
         if (msg.key === selected) fallback(msg.key);
         else renderLib();
+        break;
+      }
+      case "display": {
+        const before = qualityProfile(settings.quality, refreshHz).fpsCap;
+        refreshHz = msg.refreshHz;
+        const fpsCap = qualityProfile(settings.quality, refreshHz).fpsCap;
+        if (fpsCap !== before) pluginHost.setSettings({ fpsCap });
         break;
       }
     }
