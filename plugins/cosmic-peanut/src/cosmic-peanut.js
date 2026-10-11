@@ -149,7 +149,7 @@ export default async function create(ctx) {
       gl.uniformMatrix4fv(U.uProj, false, camera.proj);
       gl.uniformMatrix4fv(U.uView, false, camera.view);
       gl.bindVertexArray(vao);
-      gl.drawArraysInstanced(gl.LINE_STRIP, 0, M + 1, history.N);
+      gl.drawArraysInstanced(gl.LINE_STRIP, 0, M + 1, history.N - 1); // ring N − 1 has faded out
       gl.disable(gl.BLEND);
 
       if (!direct) {

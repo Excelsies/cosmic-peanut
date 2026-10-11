@@ -163,12 +163,13 @@ describe("cosmic-peanut GL", () => {
     }
   });
 
-  it("draws the rings as one instanced line strip each, with no vertex or index buffers", async () => {
+  it("draws one instanced line strip per ring but the oldest, with no vertex or index buffers", async () => {
+    // The oldest ring has age (N − 1 + frac) / (N − 1) ≥ 1: fully faded, it adds exactly zero.
     const { gl, viz, setParams } = await setup();
     const [rings] = frameDraws(gl, viz);
-    expect([rings.name, ...rings.args]).toEqual(["drawArraysInstanced", "LINE_STRIP", 0, 513, 240]);
+    expect([rings.name, ...rings.args]).toEqual(["drawArraysInstanced", "LINE_STRIP", 0, 513, 239]);
     setParams({ density: "dense" });
-    expect(frameDraws(gl, viz)[0].args).toEqual(["LINE_STRIP", 0, 513, 400]);
+    expect(frameDraws(gl, viz)[0].args).toEqual(["LINE_STRIP", 0, 513, 399]);
     expect(gl.calls.filter((/** @type {any[]} */ c) => c[0] === "createBuffer" || c[0] === "bufferData")).toEqual([]);
   });
 });

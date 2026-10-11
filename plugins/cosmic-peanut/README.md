@@ -35,7 +35,8 @@ motion on, Orbit speed and Bass pulse act as 0 and 0.1 until you move them off t
 - **History** (`history.js`, `scheduler.js`): rings go into an M × N `R32F` texture used as a
   circular buffer, one `texSubImage2D` row per ring. Rings are pushed at a fixed N ÷ travel per
   second from a `dt` accumulator; the leftover fraction moves every ring continuously between
-  pushes. Unwritten rows hold a sentinel (1e6) and are invisible.
+  pushes. Unwritten rows hold a sentinel (1e6); the vertex shader clips those rings whole, and
+  the oldest ring (fully faded) isn't drawn.
 - **Geometry** (`shaders/rings.vert`): one `drawArraysInstanced` call, a `LINE_STRIP` of M + 1
   points per ring with no vertex or index buffers; the vertex shader places point j =
   `gl_VertexID` of ring i = `gl_InstanceID` at latitude π·age, radius (1 + amp·s)(1 + 0.06·p).
