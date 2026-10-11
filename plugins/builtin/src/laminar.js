@@ -77,6 +77,24 @@ export default async function create(ctx) {
   const resP = prog(resFs, "resample.frag");
   const compP = prog(compFs, "composite.frag");
   const programs = [advP, corP, curlP, viscP, divP, presP, projP, resP, compP];
+  const simPrograms = [advP, corP, curlP, viscP, divP, presP, projP];
+  // Sampler units never change: unit i for each program's i-th sampler here.
+  /** @type {[typeof advP, string[]][]} */
+  const samplers = [
+    [advP, ["u_vel", "u_fv", "u_fs"]],
+    [corP, ["u_v0", "u_s0", "u_vf", "u_sf", "u_vb", "u_sb", "u_curl"]],
+    [curlP, ["u_vel"]],
+    [viscP, ["u_x", "u_b"]],
+    [divP, ["u_vel"]],
+    [presP, ["u_p", "u_div"]],
+    [projP, ["u_vel", "u_p"]],
+    [resP, ["u_old"]],
+    [compP, ["u_scal"]],
+  ];
+  for (const [p, names] of samplers) {
+    gl.useProgram(p.program);
+    names.forEach((n, i) => gl.uniform1i(p.u[n], i));
+  }
 
   const half =
     Boolean(gl.getExtension("EXT_color_buffer_float")) || Boolean(gl.getExtension("EXT_color_buffer_half_float"));
@@ -119,6 +137,7 @@ export default async function create(ctx) {
   const vcur = 0; // the velocity state lives in vel[0]; vel[1] is scratch within a step
   let scur = 0; // scalar ping-pong
   let U = 0; // inflow speed the sim state currently has
+  let unit = -1; // active texture unit (only bind() changes it)
 
   /** Allocate a target's storage and clear it. @param {Target} t @param {number} r */
   function alloc(t, r) {
@@ -167,14 +186,12 @@ export default async function create(ctx) {
       gl.useProgram(resP.program);
       gl.uniform2f(resP.u.u_Lnew, lx, ly);
       gl.uniform2f(resP.u.u_Lold, oldLx, oldLy);
-      gl.uniform1i(resP.u.u_old, 0);
-      gl.activeTexture(gl.TEXTURE0);
       gl.uniform1f(resP.u.u_psi, 0);
-      gl.bindTexture(gl.TEXTURE_2D, keepV.tex);
+      bind(0, keepV.tex);
       gl.bindFramebuffer(gl.FRAMEBUFFER, vel[vcur].fbo);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.uniform1f(resP.u.u_psi, 1);
-      gl.bindTexture(gl.TEXTURE_2D, keepS.tex);
+      bind(0, keepS.tex);
       gl.bindFramebuffer(gl.FRAMEBUFFER, scal[scur].fbo);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
@@ -183,6 +200,11 @@ export default async function create(ctx) {
     attach2(newFbo[0], vel[1], scal[0]);
     attach2(newFbo[1], vel[1], scal[1]);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    for (const p of simPrograms) {
+      gl.useProgram(p.program);
+      gl.uniform2f(p.u.u_L, lx, ly);
+      gl.uniform2f(p.u.u_texel, 1 / sw, 1 / sh);
+    }
   }
   /** Swap two targets' textures (and re-point their framebuffers). @param {Target} a @param {Target} b */
   function swapTex(a, b) {
@@ -207,22 +229,21 @@ export default async function create(ctx) {
 
   resize();
 
-  /** @param {number} unit @param {WebGLTexture} tex */
-  function bind(unit, tex) {
-    gl.activeTexture(gl.TEXTURE0 + unit);
+  /** @param {number} u @param {WebGLTexture} tex */
+  function bind(u, tex) {
+    if (u !== unit) gl.activeTexture(gl.TEXTURE0 + u);
+    unit = u;
     gl.bindTexture(gl.TEXTURE_2D, tex);
   }
   /**
-   * Use a sim program and set its common.glsl uniforms: grid, sphere (centre, radius, velocity,
-   * growth rate), inflow speed.
+   * Use a sim program and set its common.glsl uniforms: sphere (centre, radius, velocity, growth
+   * rate), inflow speed. The grid's (u_L, u_texel) are set on resize.
    * @param {{ program: WebGLProgram, u: Record<string, WebGLUniformLocation | null> }} p
    * @param {number} bx @param {number} by @param {number} br
    * @param {number} bvx @param {number} bvy @param {number} bdr
    */
   function setCommon(p, bx, by, br, bvx, bvy, bdr) {
     gl.useProgram(p.program);
-    gl.uniform2f(p.u.u_L, lx, ly);
-    gl.uniform2f(p.u.u_texel, 1 / sw, 1 / sh);
     gl.uniform3f(p.u.u_ball, bx, by, br);
     gl.uniform3f(p.u.u_ballVel, bvx, bvy, bdr);
     gl.uniform1f(p.u.u_U, U);
@@ -272,15 +293,11 @@ export default async function create(ctx) {
           setCommon(curlP, bx, by, R, drift.vx, drift.vy, dR);
           gl.bindFramebuffer(gl.FRAMEBUFFER, curl.fbo);
           bind(0, V0.tex);
-          gl.uniform1i(curlP.u.u_vel, 0);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
 
         // MacCormack: forward, then backward from the forward result.
         setCommon(advP, bx, by, R, drift.vx, drift.vy, dR);
-        gl.uniform1i(advP.u.u_vel, 0);
-        gl.uniform1i(advP.u.u_fv, 1);
-        gl.uniform1i(advP.u.u_fs, 2);
         gl.bindFramebuffer(gl.FRAMEBUFFER, fwdFbo);
         bind(0, V0.tex);
         bind(1, V0.tex);
@@ -304,13 +321,6 @@ export default async function create(ctx) {
         bind(4, vb.tex);
         bind(5, sb.tex);
         bind(6, curl.tex);
-        gl.uniform1i(c.u_v0, 0);
-        gl.uniform1i(c.u_s0, 1);
-        gl.uniform1i(c.u_vf, 2);
-        gl.uniform1i(c.u_sf, 3);
-        gl.uniform1i(c.u_vb, 4);
-        gl.uniform1i(c.u_sb, 5);
-        gl.uniform1i(c.u_curl, 6);
         gl.uniform1f(c.u_dt, sdt);
         gl.uniform1f(c.u_dU, dU);
         gl.uniform1f(c.u_vort, vort);
@@ -326,8 +336,6 @@ export default async function create(ctx) {
         if (alpha > 0.02) {
           setCommon(viscP, bx, by, R, drift.vx, drift.vy, dR);
           gl.uniform1f(viscP.u.u_alpha, alpha);
-          gl.uniform1i(viscP.u.u_x, 0);
-          gl.uniform1i(viscP.u.u_b, 1);
           bind(1, V.tex);
           let src = V;
           for (let j = 0; j < VISC_ITERS; j++) {
@@ -344,11 +352,8 @@ export default async function create(ctx) {
         setCommon(divP, bx, by, R, drift.vx, drift.vy, dR);
         gl.bindFramebuffer(gl.FRAMEBUFFER, div.fbo);
         bind(0, V.tex);
-        gl.uniform1i(divP.u.u_vel, 0);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         setCommon(presP, bx, by, R, drift.vx, drift.vy, dR);
-        gl.uniform1i(presP.u.u_p, 0);
-        gl.uniform1i(presP.u.u_div, 1);
         bind(1, div.tex);
         for (let j = 0; j < JACOBI; j++) {
           gl.bindFramebuffer(gl.FRAMEBUFFER, pres[(j + 1) & 1].fbo);
@@ -359,8 +364,6 @@ export default async function create(ctx) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, V0.fbo);
         bind(0, V.tex);
         bind(1, pres[JACOBI & 1].tex);
-        gl.uniform1i(projP.u.u_vel, 0);
-        gl.uniform1i(projP.u.u_p, 1);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         // The projected velocity is back in vel[0]; the scalars moved to scal[scur].
       }
@@ -382,7 +385,6 @@ export default async function create(ctx) {
       gl.useProgram(compP.program);
       bind(0, scal[scur].tex);
       const u = compP.u;
-      gl.uniform1i(u.u_scal, 0);
       gl.uniform2f(u.u_simSize, sw || 1, sh || 1);
       gl.uniform2f(u.u_L, lx, ly);
       gl.uniform1f(u.u_aspect, aspect);
