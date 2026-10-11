@@ -83,6 +83,11 @@ export default async function create(ctx) {
   const inkColors = new Float32Array(12);
   const paper = new Float32Array(4);
   const map = new Float64Array(5);
+  // What the canvas shows was drawn from: until it changes, the frame would draw the same image.
+  let drawn = false;
+  let drawnSheen = 0;
+  let drawnW = 0;
+  let drawnH = 0;
 
   function applyParams() {
     const pal = paletteOf(ctx.params.palette);
@@ -170,10 +175,20 @@ export default async function create(ctx) {
       if (!queue.fits(marbler.count)) bake();
       queue.append(marbler);
 
+      // No events (so no bake), the same sheen as the shader got and the same size: leave the
+      // canvas on its last image, which a WebGL canvas keeps until the next draw. dt = 0 is a
+      // (re)started loop, e.g. the window was hidden: draw then anyway.
+      const { width: w, height: h } = ctx.size;
+      const sheen = Math.fround(marbler.sheen);
+      if (drawn && marbler.count === 0 && sheen === drawnSheen && w === drawnW && h === drawnH && time.dt > 0) return;
+      drawn = true;
+      drawnSheen = sheen;
+      drawnW = w;
+      drawnH = h;
+
       gl.bindVertexArray(vao);
       gl.disable(gl.DEPTH_TEST);
       gl.disable(gl.BLEND);
-      const { width: w, height: h } = ctx.size;
       const ink = inks[cur];
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);
@@ -192,6 +207,7 @@ export default async function create(ctx) {
 
     params() {
       applyParams();
+      drawn = false;
     },
 
     dispose() {
