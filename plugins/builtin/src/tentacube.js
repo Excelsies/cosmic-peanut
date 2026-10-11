@@ -356,6 +356,7 @@ export default async function create(ctx) {
   composer.addPass(bloom);
   const output = new OutputPass();
   output.material.fragmentShader = keepAlpha(output.material.fragmentShader);
+  output.needsSwap = false; // all passes work in place: no swap, so the second target is never allocated
   composer.addPass(output);
   const prevToneMapping = renderer.toneMapping;
   const prevExposure = renderer.toneMappingExposure;
