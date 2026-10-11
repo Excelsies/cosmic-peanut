@@ -192,7 +192,7 @@ Shell → host:
 | `setSource` | `id` |
 | `settings` | partial settings object (persisted): `quality`, `reduceFlashing`, `autoCycleSeconds` (0 = off), `hudVisible`, `photosensitivityNoticeSeen`, `transparent`, `backgroundOpacity` (0–1, default 0), `visualOpacity` (0.1–1, default 1), … — the opacities apply only while `transparent` is on; out-of-range values are ignored. `hello.settings` returns the same keys |
 | `pluginError` | `key`, `message`, `file?`, `line?`, `fatal: bool` |
-| `perf` | `key`, `fps`, `frameMsP50`, `frameMsP99`, `pluginMsP50`, `shellMs`, `renderScale`, `dropped` (1/s) |
+| `perf` | `key`, `fps`, `frameMsP50`, `frameMsP99`, `pluginMsP50`, `shellMs`, `renderScale`, `dropped`, `throttled` (1/s). `throttled`: the active iframe looks held by WebKit's ~20 fps cross-origin throttle (≤ 25 fps and < 0.8 × min(60, `fpsCap`)); the host then sends a native click into the web view, at most every 2 s |
 | `onsetSeen` | `frameIndex` — SDK saw the onset of that frame (latency measurement) |
 | `install` | `url` → host fetches, then `installPrompt` |
 | `installConfirm` | `id`, `accept: bool` |

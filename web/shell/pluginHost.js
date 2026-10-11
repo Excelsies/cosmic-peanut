@@ -17,7 +17,7 @@ import { parsePluginMessage } from "./validate.js";
  * @typedef {{ kind: "ready"; key: string }
  *   | { kind: "error"; key: string; error: PluginError; reload: boolean }
  *   | { kind: "fatal"; key: string; error: PluginError; wasActive: boolean }
- *   | { kind: "perf"; key: string; perf: PluginPerf }
+ *   | { kind: "perf"; key: string; perf: PluginPerf; throttled: boolean }
  *   | { kind: "onsetSeen"; key: string; frameIndex: number }
  *   | { kind: "log"; key: string; text: string }
  *   | { kind: "contextLost"; key: string }} PluginEvent
@@ -41,7 +41,7 @@ export const CROSSFADE_MS = 1500;
 const READY_TIMEOUT_MS = 10_000;
 const REMOVE_DELAY_MS = 100; // let the SDK run dispose() before the iframe goes away
 const RING = 512;
-const THROTTLED_FPS = 40;
+const THROTTLED_MAX_FPS = 25; // WebKit holds a never-clicked cross-origin iframe near 20 fps
 
 /** @param {{ message: string; file?: string; line?: number }} e */
 export function formatError(e) {
@@ -74,6 +74,12 @@ export function createPluginHost(deps) {
   const scratch = new Float64Array(RING);
   let ringIdx = 0;
   let ringCount = 0;
+
+  /** Throttled, not merely capped (Battery) or slow: below the throttle rate and the target. @param {number} fps */
+  function isThrottled(fps) {
+    const target = settings.fpsCap > 0 ? Math.min(60, settings.fpsCap) : 60;
+    return fps > 0 && fps <= THROTTLED_MAX_FPS && fps < 0.8 * target;
+  }
 
   function refresh() {
     others = [];
@@ -224,8 +230,9 @@ export function createPluginHost(deps) {
         // (tools/spike/REPORT.md). The iframe normally ignores the pointer so the shell sees
         // the mouse; while it's throttled, let the next click (the host's native one, or the
         // user's) through, then take the pointer back.
-        if (slot === active) slot.iframe.style.pointerEvents = m.fps > 0 && m.fps < THROTTLED_FPS ? "auto" : "";
-        onEvent({ kind: "perf", key, perf });
+        const throttled = slot === active && isThrottled(m.fps);
+        if (slot === active) slot.iframe.style.pointerEvents = throttled ? "auto" : "";
+        onEvent({ kind: "perf", key, perf, throttled });
         break;
       }
       case "onsetSeen":

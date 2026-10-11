@@ -506,6 +506,7 @@ export function createApp(deps) {
           shellMs: shell.p50,
           renderScale: p.renderScale,
           dropped: p.dropped,
+          throttled: e.throttled,
         });
         break;
       }

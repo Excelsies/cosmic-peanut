@@ -129,6 +129,7 @@ describe("pluginHost", () => {
     port.emit(new ArrayBuffer(3));
     expect(events.map((e) => e.kind)).toEqual(["ready", "perf", "onsetSeen", "log", "contextLost"]);
     expect(events[1].perf.fps).toBe(60);
+    expect(events[1].throttled).toBe(false);
     expect(events[2]).toEqual({ kind: "onsetSeen", key: "r/a", frameIndex: 7 });
     expect(events[3].text).toBe("<b>hi</b>");
   });
@@ -279,6 +280,32 @@ describe("pluginHost", () => {
     expect(made[0].iframe.style.pointerEvents).toBe("auto");
     perf(60);
     expect(made[0].iframe.style.pointerEvents).toBe("");
+  });
+
+  it("judges the throttle against the fps cap, not a fixed rate", () => {
+    const { host, load, made, events } = setup();
+    host.show(vizA, {});
+    const pa = load(0);
+    pa.emit({ type: "ready" });
+    const perf = (/** @type {number} */ fps) =>
+      pa.emit({ type: "perf", fps, frameMsP50: 2, frameMsP99: 5, pluginMsP50: 1, renderScale: 1, dropped: 0 });
+    const throttled = () => events.filter((e) => e.kind === "perf").at(-1).throttled;
+    perf(35); // a heavy plugin, uncapped: slow, not throttled
+    expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["", false]);
+    host.setSettings({ fpsCap: 30 }); // Battery
+    perf(30);
+    expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["", false]);
+    perf(20); // still caught under the cap
+    expect([made[0].iframe.style.pointerEvents, throttled()]).toEqual(["auto", true]);
+  });
+
+  it("reports a throttle for the active iframe only", () => {
+    const { host, load, events } = setup();
+    host.show(vizA, {});
+    load(0).emit({ type: "ready" });
+    host.show(vizB, {});
+    load(1).emit({ type: "perf", fps: 20, frameMsP50: 2, frameMsP99: 5, pluginMsP50: 1, renderScale: 1, dropped: 0 });
+    expect(events.at(-1)).toMatchObject({ kind: "perf", key: "r/b", throttled: false });
   });
 
   it("forwards pointer input to the active plugin only", () => {

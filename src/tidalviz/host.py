@@ -38,7 +38,6 @@ from tidalviz.transport.control import HANG_AFTER_S, TextSocket
 log = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = 1
-THROTTLED_FPS = 40  # WebKit runs a never-clicked cross-origin iframe's rAF at 20 Hz
 CLICK_INTERVAL_S = 2.0
 RECOVER_INTERVAL_S = 60.0  # a web view that keeps failing after a reload must not loop
 STATS_INTERVAL_S = 1.0
@@ -305,8 +304,8 @@ class Host:
             case "params":
                 self.settings.set_params(msg["key"], msg["values"])
             case "perf":
-                self._log_rate(msg["key"], msg["fps"])
-                self._maybe_click(msg["fps"])
+                self._log_rate(msg["key"], msg["fps"], msg["throttled"])
+                self._maybe_click(msg["throttled"])
             case "onsetSeen":
                 self._onset_seen(msg["frameIndex"])
             case "setSource":
@@ -336,16 +335,16 @@ class Host:
             case _:
                 pass
 
-    def _log_rate(self, key: str, fps: float) -> None:
-        throttled = 0 < fps < THROTTLED_FPS
+    def _log_rate(self, key: str, fps: float, throttled: bool) -> None:
         if throttled != self._throttled:
             self._throttled = throttled
             log.info("%s %s at %.0f fps", key, "throttled" if throttled else "running", fps)
 
-    def _maybe_click(self, fps: float) -> None:
-        """Lift WebKit's 20 Hz throttle on a fresh plugin iframe with one native click."""
+    def _maybe_click(self, throttled: bool) -> None:
+        """Lift WebKit's 20 Hz throttle on a fresh plugin iframe with one native click. The
+        shell judges the throttle (active iframe only, against its fps cap)."""
         now = asyncio.get_running_loop().time()
-        if 0 < fps < THROTTLED_FPS and now - self._last_click >= CLICK_INTERVAL_S:
+        if throttled and now - self._last_click >= CLICK_INTERVAL_S:
             self._last_click = now
             self.window.click_plugin()
 

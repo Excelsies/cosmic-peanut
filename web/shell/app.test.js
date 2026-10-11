@@ -256,8 +256,8 @@ describe("app: plugin events", () => {
   it("perf goes to the host with shell time, and onsetSeen is forwarded", () => {
     const { app, host, last } = setup();
     app.handle(hello());
-    host.emit({ kind: "perf", key: "builtin/bars", perf: { fps: 60, frameMsP50: 3, frameMsP99: 7, pluginMsP50: 1, renderScale: 1, dropped: 0 } });
-    expect(last("perf")).toEqual({ type: "perf", key: "builtin/bars", fps: 60, frameMsP50: 3, frameMsP99: 7, pluginMsP50: 1, shellMs: 0.05, renderScale: 1, dropped: 0 });
+    host.emit({ kind: "perf", key: "builtin/bars", perf: { fps: 20, frameMsP50: 3, frameMsP99: 7, pluginMsP50: 1, renderScale: 1, dropped: 0 }, throttled: true });
+    expect(last("perf")).toEqual({ type: "perf", key: "builtin/bars", fps: 20, frameMsP50: 3, frameMsP99: 7, pluginMsP50: 1, shellMs: 0.05, renderScale: 1, dropped: 0, throttled: true });
     host.emit({ kind: "onsetSeen", key: "builtin/bars", frameIndex: 42 });
     expect(last("onsetSeen")).toEqual({ type: "onsetSeen", frameIndex: 42 });
   });
