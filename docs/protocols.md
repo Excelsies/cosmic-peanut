@@ -102,7 +102,9 @@ Threads: catap worker (Linux: the `pw-record` reader thread) → `on_samples` co
 and returns. The analysis thread wakes each hop (512 samples), runs the `Analyzer`, encodes, and
 calls `loop.call_soon_threadsafe(hub.publish, data)`. The hub sends the newest frame to each client
 whose previous send has completed and drops the rest. Analysis pauses while no renderer is
-connected.
+connected. A silent frame equal to the last published one apart from frame index and host time is
+published only once a second; `resume()`, called on every client-count change, sends the next one
+regardless, so a newly connected client gets a frame.
 
 ## 3. HTTP servers
 

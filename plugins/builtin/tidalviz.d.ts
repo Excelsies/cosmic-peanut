@@ -79,7 +79,10 @@ export interface AudioFrame {
   /** True while the source is silent (also true when capture permission is missing). */
   readonly silent: boolean;
 
-  /** Host frame counter. */
+  /**
+   * Host frame counter. During digital silence an unchanged frame is resent only once a second, so
+   * this and `hostTime` then advance about once a second (skipping the frames not sent).
+   */
   readonly frameIndex: number;
   /** Source sample rate in Hz. */
   readonly sampleRate: number;

@@ -184,6 +184,9 @@ keep (`myCopy.set(audio.bands)`).
 | `hostTime` | number | Host monotonic time (s) of the newest sample in the frame |
 
 Before the first audio frame arrives, `frame` receives a silent all-zero frame (`silent: true`).
+During digital silence a frame identical to the last one is sent only once a second, so
+`frameIndex` and `hostTime` advance about once a second (`frameIndex` skips the frames not sent)
+until something changes.
 
 `time = { now, dt, frame }`: seconds since start (paused while hidden), seconds since the previous
 frame (clamped to 0.1; 0 on the first frame), and the rendered-frame counter.
