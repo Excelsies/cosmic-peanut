@@ -102,8 +102,9 @@ void main() {
   // The shirt lies a little unevenly: a slow, large-scale drape warp, breathing very gently.
   vec2 drape = vec2(fbm3(p * 0.9 + 3.1 + u_time * 0.01), fbm3(p * 0.9 - 7.7 - u_time * 0.01)) - 0.5;
   vec2 q = p + 0.09 * drape;
-  // The bound center of a twist is a crumpled knot: extra local warp there.
-  q += 0.05 * (1.0 - smoothstep(0.0, 0.3, length(p))) * (vec2(fbm3(p * 9.0 + 2.0), fbm3(p * 9.0 - 4.0)) - 0.5);
+  // The bound center of a twist is a crumpled knot: extra local warp there (none past r = 0.3).
+  float knot = 1.0 - smoothstep(0.0, 0.3, length(p));
+  if (knot > 0.0) q += 0.05 * knot * (vec2(fbm3(p * 9.0 + 2.0), fbm3(p * 9.0 - 4.0)) - 0.5);
 
   float r = length(q);
   float ang = atan(q.y, q.x) / TAU;
