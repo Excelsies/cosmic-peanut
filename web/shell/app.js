@@ -305,7 +305,13 @@ export function createApp(deps) {
     }
   }
 
+  // Closed panels aren't rebuilt (each switch would rebuild every card); they render on open.
+  let libStale = true;
+  let paramsStale = true;
+
   function renderLib() {
+    libStale = openPanel !== "library";
+    if (libStale) return;
     renderLibrary(libraryBody, { visualizers, repos, active: selected, updates }, {
       select: (key) => {
         select(key);
@@ -324,6 +330,8 @@ export function createApp(deps) {
   }
 
   function renderParamsPanel() {
+    paramsStale = openPanel !== "params";
+    if (paramsStale) return;
     const v = selected ? find(selected) : undefined;
     if (!v) {
       paramsBody.replaceChildren(h("p", { class: "muted" }, "No visualizer selected."));
@@ -570,6 +578,8 @@ export function createApp(deps) {
     if (!openPanel) returnFocus = doc.activeElement;
     for (const [n, el] of Object.entries(panels)) el.hidden = n !== name;
     openPanel = name;
+    if (name === "library" && libStale) renderLib();
+    if (name === "params" && paramsStale) renderParamsPanel();
     root.classList.add("panel-open");
     idle.poke();
     const target = /** @type {HTMLElement | null} */ (panels[name].querySelector("input, select, button:not(.close)") ?? panels[name].querySelector("button"));

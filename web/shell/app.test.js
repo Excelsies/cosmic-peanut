@@ -75,8 +75,9 @@ afterEach(() => vi.useRealTimers());
 
 describe("app: hello and selection", () => {
   it("hello renders the library and shows the active visualizer with its stored values", () => {
-    const { app, root, host } = setup();
+    const { app, root, host, press } = setup();
     app.handle(hello());
+    press("l");
     expect(root.querySelectorAll("#library .card")).toHaveLength(3);
     expect(host.show).toHaveBeenCalledWith(A, { hue: 120 });
     expect(root.querySelector(".now-name")?.textContent).toBe("Bars");
@@ -104,8 +105,9 @@ describe("app: hello and selection", () => {
   });
 
   it("clicking a library card selects it and sends select", () => {
-    const { app, root, host, last } = setup();
+    const { app, root, host, last, press } = setup();
     app.handle(hello());
+    press("l");
     const cards = root.querySelectorAll("#library .card button.card-main");
     /** @type {HTMLButtonElement} */ (cards[1]).click();
     expect(host.show).toHaveBeenLastCalledWith(B, {});
@@ -115,6 +117,7 @@ describe("app: hello and selection", () => {
   it("params panel forwards changes to the plugin live and saves full values on change", () => {
     const { app, root, host, last } = setup();
     app.handle(hello());
+    /** @type {HTMLButtonElement} */ (root.querySelector('button[title="Parameters"]')).click();
     const hue = /** @type {HTMLInputElement} */ (root.querySelector("#param-hue"));
     expect(hue.value).toBe("120");
     hue.value = "300";
@@ -140,8 +143,9 @@ describe("app: hello and selection", () => {
   });
 
   it("visualizers update refreshes the library; removal of the active one falls back", () => {
-    const { app, root, host } = setup();
+    const { app, root, host, press } = setup();
     app.handle(hello());
+    press("l");
     app.handle({ type: "visualizers", visualizers: [B, C], repos: [] });
     expect(root.querySelectorAll("#library .card")).toHaveLength(2);
     expect(host.show).toHaveBeenLastCalledWith(B, {});
@@ -176,6 +180,22 @@ describe("app: keys", () => {
       { type: "window", action: "fullscreen" },
       { type: "window", action: "floatOnTop" },
     ]);
+  });
+
+  it("closed panels aren't rebuilt on a switch; they render when opened", () => {
+    const { app, root, press } = setup();
+    app.handle(hello());
+    expect(root.querySelectorAll("#library .card")).toHaveLength(0);
+    expect(root.querySelector("#param-hue")).toBeNull();
+    press("l");
+    const card = root.querySelector("#library .card");
+    expect(root.querySelectorAll("#library .card")).toHaveLength(3);
+    press("Escape");
+    app.select("builtin/orb");
+    expect(card?.isConnected).toBe(true); // not rebuilt while closed
+    press("l");
+    expect(card?.isConnected).toBe(false);
+    expect(root.querySelector('#library .card[aria-current="true"]')?.textContent).toContain("Orb");
   });
 
   it("L toggles the library, Esc closes panels", () => {
@@ -371,8 +391,9 @@ describe("app: host messages", () => {
   });
 
   it("disabled marks the visualizer and falls back if it was active", () => {
-    const { app, root, host } = setup();
+    const { app, root, host, press } = setup();
     app.handle(hello());
+    press("l");
     app.handle({ type: "disabled", key: "builtin/bars", reason: "It stopped responding" });
     expect(host.show).toHaveBeenLastCalledWith(B, {});
     expect(root.querySelector("#status")?.textContent).toContain("It stopped responding");
@@ -380,8 +401,9 @@ describe("app: host messages", () => {
   });
 
   it("library actions send install/addFolder/enable", () => {
-    const { app, root, last } = setup();
+    const { app, root, last, press } = setup();
     app.handle(hello());
+    press("l");
     /** @type {HTMLButtonElement} */ (root.querySelector("button.add-folder")).click();
     expect(last("addFolder")).toEqual({ type: "addFolder" });
   });
