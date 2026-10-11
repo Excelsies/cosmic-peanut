@@ -239,8 +239,8 @@ export default async function create(ctx) {
     chains = createChains(6, nodes);
     frames = new Float32Array(6 * nodes * 6);
     tangents = new Float32Array(6 * nodes * 3);
-    nodeData = new Float32Array(nodes * 6 * 3 * 4);
-    nodeTex = new THREE.DataTexture(nodeData, nodes, 18, THREE.RGBAFormat, THREE.FloatType);
+    nodeData = new Float32Array(nodes * 6 * 2 * 4);
+    nodeTex = new THREE.DataTexture(nodeData, nodes, 12, THREE.RGBAFormat, THREE.FloatType);
     nodeTex.magFilter = nodeTex.minFilter = THREE.NearestFilter;
     nodeTex.needsUpdate = true;
     tubeUniforms.uNodes.value = nodeTex;
@@ -470,18 +470,14 @@ export default async function create(ctx) {
         for (let j = 0; j < nodes; j++) {
           const src = (c * nodes + j) * 3;
           const f = (c * nodes + j) * 6;
-          const row0 = ((c * 3) * nodes + j) * 4;
-          const row1 = ((c * 3 + 1) * nodes + j) * 4;
-          const row2 = ((c * 3 + 2) * nodes + j) * 4;
+          const row0 = ((c * 2) * nodes + j) * 4;
+          const row1 = ((c * 2 + 1) * nodes + j) * 4;
           nodeData[row0] = chains.pos[src];
           nodeData[row0 + 1] = chains.pos[src + 1];
           nodeData[row0 + 2] = chains.pos[src + 2];
           nodeData[row1] = frames[f];
           nodeData[row1 + 1] = frames[f + 1];
           nodeData[row1 + 2] = frames[f + 2];
-          nodeData[row2] = frames[f + 3];
-          nodeData[row2 + 1] = frames[f + 4];
-          nodeData[row2 + 2] = frames[f + 5];
         }
       }
       nodeTex.needsUpdate = true;
