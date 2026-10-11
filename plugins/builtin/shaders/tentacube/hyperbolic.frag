@@ -56,14 +56,13 @@ void main() {
   // Fold into the fundamental triangle (mirrors fold() in hyperbolic.js).
   float a = uTile.x, cx = uTile.y, cr = uTile.z;
   float a2 = 2.0 * a;
-  float ca = cos(a), sa = sin(a);
   float gen = 0.0;
   for (int i = 0; i < FOLD_ITERATIONS; i++) {
     float ang = atan(z.y, z.x);
     float k = floor(ang / a2);
     float c = cos(-k * a2), s = sin(-k * a2);
     z = vec2(z.x * c - z.y * s, z.x * s + z.y * c);
-    if (z.y * ca - z.x * sa > 0.0) { // arg z in [0, 2a), 2a <= pi: arg z > a
+    if (atan(z.y, z.x) > a) {
       c = cos(a2); s = sin(a2);
       z = vec2(z.x * c + z.y * s, z.x * s - z.y * c);
     }

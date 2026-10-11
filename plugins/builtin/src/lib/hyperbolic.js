@@ -138,8 +138,6 @@ const step = new Float64Array(9);
 export function fold(x, y, t, out, g = null) {
   const a2 = 2 * t.alpha;
   const r2 = t.r * t.r;
-  const ca = Math.cos(t.alpha);
-  const sa = Math.sin(t.alpha);
   let n = 0;
   if (g) g.set(IDENTITY);
   for (let i = 0; i < FOLD_ITERATIONS; i++) {
@@ -153,8 +151,7 @@ export function fold(x, y, t, out, g = null) {
       x = nx;
       if (g) mobiusCompose(g, mobiusRotate(step, -k * a2), g);
     }
-    // arg z ∈ [0, 2α) and 2α ≤ π, so arg z > α ⇔ sin(arg z − α) > 0.
-    if (y * ca - x * sa > 0) {
+    if (Math.atan2(y, x) > t.alpha) {
       // Mirror in the line at angle α: z ↦ e^{2iα} z̄.
       const c = Math.cos(a2);
       const s = Math.sin(a2);
