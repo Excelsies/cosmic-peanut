@@ -21,8 +21,6 @@ import {
   createSpectrumColumn,
   createLevel,
   wedgeMix,
-  wedgeColumns,
-  REBASE_AT,
 } from "./radar.js";
 
 /** @param {Partial<import('./radar.js').SweepInput>} o */
@@ -156,33 +154,6 @@ describe("sweptWedge", () => {
     expect(w[1]).toBeCloseTo(0.3, 6);
     expect(inWedge(0.02, w[0], w[1])).toBe(true);
     expect(inWedge(0.06, w[0], w[1])).toBe(false);
-  });
-});
-
-describe("wedgeColumns", () => {
-  it("covers every column of the swept wedge with at most two column ranges inside the texture", () => {
-    const COLS = 2048;
-    const out = new Int32Array(4);
-    const starts = [0, 0.25, 0.9995, 0.99, 0.5 - 0.5 / COLS, 0.37];
-    const spans = [0, 1e-4, 0.004, 0.0085, 0.3, 0.75, 0.9999, 1];
-    for (const start of starts.map(Math.fround)) {
-      for (const span of spans.map(Math.fround)) {
-        wedgeColumns(start, span, COLS, out);
-        const tag = `start ${start} span ${span}`;
-        let width = 0;
-        for (const r of [0, 2]) {
-          expect(out[r], tag).toBeGreaterThanOrEqual(0);
-          expect(out[r] + out[r + 1], tag).toBeLessThanOrEqual(COLS);
-          width += out[r + 1];
-        }
-        expect(width, tag).toBeLessThanOrEqual(Math.min(COLS, Math.ceil(span * COLS) + 4));
-        for (let c = 0; c < COLS; c++) {
-          if (!inWedge((c + 0.5) / COLS, start, span)) continue;
-          const inside = (/** @type {number} */ r) => c >= out[r] && c < out[r] + out[r + 1];
-          expect(inside(0) || inside(2), `${tag} col ${c}`).toBe(true);
-        }
-      }
-    }
   });
 });
 
@@ -382,8 +353,9 @@ describe("no randomness", () => {
 describe("createDecay", () => {
   const run = (/** @type {number} */ hz, /** @type {number} */ seconds, rate = 0.5, persistence = 0.6) => {
     const d = createDecay();
-    for (let f = 0; f < Math.round(seconds * hz); f++) d.step(1 / hz, rate, persistence);
-    return Math.exp(-d.clock);
+    let v = 1;
+    for (let f = 0; f < Math.round(seconds * hz); f++) v *= d.step(1 / hz, rate, persistence);
+    return v;
   };
 
   it("fades the same at 60 and 120 Hz: one rotation later the trail is at exp(−1/persistence)", () => {
@@ -395,27 +367,6 @@ describe("createDecay", () => {
   it("holds longer with more persistence and still fades when the sweep stops", () => {
     expect(run(60, 2, 0.5, 1.5)).toBeGreaterThan(run(60, 2, 0.5, 0.6));
     expect(run(60, 60, 0, 0.6)).toBeLessThan(0.1);
-  });
-
-  it("is a clock: a texel written at clock c has faded by exactly the product of the frames' fades since", () => {
-    const d = createDecay();
-    let product = 1;
-    let written = 0;
-    for (let f = 0; f < 600; f++) {
-      const before = d.clock;
-      const now = d.step(f % 7 === 0 ? 1 / 30 : 1 / 60, 0.05 + f / 400, 0.1 + f / 300);
-      if (f === 100) {
-        written = now;
-        product = 1;
-      } else product *= Math.exp(-(now - before));
-    }
-    expect(Math.exp(written - d.clock)).toBeCloseTo(product, 12);
-    d.rebase();
-    expect(d.clock).toBe(0);
-  });
-
-  it("rebases while stored values (gain 3 × e^clock) still fit in half-float range", () => {
-    expect(3 * Math.exp(REBASE_AT)).toBeLessThan(65504);
   });
 });
 
