@@ -202,7 +202,8 @@ Implementation rules:
 - Upload at most the rows pushed since the last frame, one row each. At 7 s travel time and Dense
   density that's about 57 rows per second.
 - Trigger search, resampling and gain run only when a ring is pushed, not every display frame.
-- Skip the offscreen pass entirely in Fine lines mode.
+- Skip the offscreen pass entirely in Fine lines mode, and in plain Soft lines when the 1× buffer
+  would be canvas-sized (the upscale would be a 1:1 copy).
 - Handle `webglcontextlost` through the SDK. Rebuilding from scratch is fine; the ring history may
   start over.
 
