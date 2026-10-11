@@ -128,14 +128,20 @@ export function createPluginHost(deps) {
       };
       iframe.contentWindow?.postMessage(init, "*", [ch.port2]);
     });
+    if (deps.visible()) armReady(slot);
+    iframe.setAttribute("src", viz.pageUrl);
+    container.append(iframe);
+    return slot;
+  }
+
+  /** The ready timeout counts only while visible: a hidden SDK doesn't render, so isn't ready. @param {Slot} slot */
+  function armReady(slot) {
+    clearTimeout(slot.timer);
     slot.timer = setTimeout(() => {
       if (!slot.ready && !slot.gone) {
         onError(slot, { type: "error", message: "Visualizer did not start within 10 s", fatal: true });
       }
     }, readyTimeoutMs);
-    iframe.setAttribute("src", viz.pageUrl);
-    container.append(iframe);
-    return slot;
   }
 
   /** @param {Slot} slot */
@@ -331,6 +337,11 @@ export function createPluginHost(deps) {
     /** @param {boolean} visible */
     setVisible(visible) {
       for (const s of live()) post(s, { type: "visibility", visible });
+      for (const s of [active, incoming, fading]) {
+        if (!s || s.ready || s.gone) continue;
+        if (visible) armReady(s);
+        else clearTimeout(s.timer);
+      }
     },
 
     /** Unload everything. */

@@ -405,10 +405,13 @@ export function createApp(deps) {
     pluginHost.setSettings({ quality: q, ...qualityProfile(q, refreshHz) });
   }
 
+  /** Not while hidden: a hidden visualizer never gets ready, so each step would fail. */
   function armCycle() {
     clearInterval(cycleTimer);
     cycleTimer = undefined;
-    if (settings.autoCycleSeconds > 0) cycleTimer = setInterval(() => step(1), settings.autoCycleSeconds * 1000);
+    if (settings.autoCycleSeconds > 0 && doc.visibilityState !== "hidden") {
+      cycleTimer = setInterval(() => step(1), settings.autoCycleSeconds * 1000);
+    }
   }
 
   // ---- selection -----------------------------------------------------------------------------
@@ -632,6 +635,7 @@ export function createApp(deps) {
   doc.addEventListener("visibilitychange", () => {
     const visible = doc.visibilityState !== "hidden";
     pluginHost.setVisible(visible);
+    armCycle();
     // Hidden pages' timers are throttled past the hang threshold: the host pauses its watchdog.
     send({ type: "visibility", visible });
   });

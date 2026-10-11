@@ -401,6 +401,29 @@ describe("app: settings", () => {
     expect(host.show).toHaveBeenLastCalledWith(C, {});
   });
 
+  it("auto-cycle pauses while the window is hidden", () => {
+    const { app, host } = setup();
+    app.handle(hello({ settings: { photosensitivityNoticeSeen: true, autoCycleSeconds: 30 } }));
+    const hidden = (/** @type {boolean} */ h) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (h ? "hidden" : "visible") });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      vi.advanceTimersByTime(20_000);
+      hidden(true);
+      host.show.mockClear();
+      vi.advanceTimersByTime(120_000);
+      expect(host.show).not.toHaveBeenCalled();
+      hidden(false); // a fresh interval
+      vi.advanceTimersByTime(29_000);
+      expect(host.show).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1_000);
+      expect(host.show).toHaveBeenLastCalledWith(B, {});
+    } finally {
+      hidden(false);
+    }
+  });
+
   it("visibility changes are forwarded to plugins", () => {
     const { app, host } = setup();
     app.handle(hello());
