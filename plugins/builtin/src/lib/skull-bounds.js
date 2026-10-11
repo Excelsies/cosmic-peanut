@@ -94,6 +94,25 @@ export function hullSpheres(jaw) {
   return out;
 }
 
+/**
+ * Radius round each row's centre (TEETH_*_C) that holds all its teeth: the arc, a tooth's
+ * half-diagonal and rounding, and a hair for float error. sdTeeth is never below the distance to
+ * that sphere, so where that is past the smin's reach, map() skips the row.
+ * @param {number} arc
+ */
+const teethBound = (arc) => arc + Math.hypot(TOOTH[0], TOOTH[1], TOOTH[2]) + TOOTH_ROUND + 0.001;
+export const TEETH_UP_BOUND = teethBound(/** @type {Teeth} */ (SHAPES.TEETH_UP).arc);
+export const TEETH_DOWN_BOUND = teethBound(/** @type {Teeth} */ (SHAPES.TEETH_DOWN).arc);
+
+/**
+ * In the jaw's own frame, skull.frag's sdJaw is never below length(j - JAW_BOUND_C) - JAW_BOUND_R,
+ * so where the cranium is nearer than that, map() skips the jaw. This bounds the function, not just
+ * the shape (its smins dip under their parts and its ellipsoid distance is approximate); the tests
+ * check it against a JS sdJaw.
+ */
+export const JAW_BOUND_C = [0, -0.66, 0.12];
+export const JAW_BOUND_R = 0.84;
+
 /** Camera distance from the skull's centre (object units at scale 1). */
 export const CAM_DIST = 6;
 
@@ -124,6 +143,10 @@ export function glslDefines() {
     `#define TOOTH_ROUND ${f(TOOTH_ROUND)}`,
     `#define TOOTH_STEP ${f(TOOTH_STEP)}`,
     `#define TOOTH_SIDE ${f(TOOTH_SIDE)}`,
+    `#define TEETH_UP_BOUND ${f(TEETH_UP_BOUND)}`,
+    `#define TEETH_DOWN_BOUND ${f(TEETH_DOWN_BOUND)}`,
+    `#define JAW_BOUND_C ${vec3(JAW_BOUND_C)}`,
+    `#define JAW_BOUND_R ${f(JAW_BOUND_R)}`,
   ];
   for (const [name, s] of Object.entries(SHAPES)) {
     if (s.kind === "ellipsoid") lines.push(`#define ${name}_C ${vec3(s.c)}`, `#define ${name}_R ${vec3(s.r)}`);

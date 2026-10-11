@@ -48,6 +48,13 @@ float sdTeeth(vec3 p, vec3 c, float arc) {
   return sdRoundBox(q, TOOTH * vec3(1.0, s, 1.0), TOOTH_ROUND);
 }
 
+// smin(d, teeth, 0.015), skipping the teeth where their bounding sphere (lib/skull-bounds.js) is
+// beyond the smin's reach: there it returns d anyway.
+float withTeeth(float d, vec3 p, vec3 c, float arc, float bound) {
+  if (length(p - c) - bound >= d + 0.015) return d;
+  return smin(d, sdTeeth(p, c, arc), 0.015);
+}
+
 // Skull without the jaw. m = mirrored point (x ≥ 0).
 float sdCranium(vec3 p) {
   vec3 m = vec3(abs(p.x), p.yz);
@@ -63,8 +70,7 @@ float sdCranium(vec3 p) {
   d = smax(d, -sdEllipsoid(m - SOCKET_C, SOCKET_R), 0.05);
   float nose = min(sdEllipsoid(m - NOSE_LOBE_C, NOSE_LOBE_R), sdEllipsoid(p - NOSE_TIP_C, NOSE_TIP_R));
   d = smax(d, -nose, 0.03);
-  d = smin(d, sdTeeth(p, TEETH_UP_C, TEETH_UP_ARC), 0.015);
-  return d;
+  return withTeeth(d, p, TEETH_UP_C, TEETH_UP_ARC, TEETH_UP_BOUND);
 }
 
 vec3 toJaw(vec3 p) {
@@ -75,21 +81,25 @@ vec3 toJaw(vec3 p) {
   return JAW_HINGE + vec3(q.x, q.y * c + q.z * s, -q.y * s + q.z * c);
 }
 
-float sdJaw(vec3 p) {
-  vec3 j = toJaw(p);
+// j: a point in the jaw's frame (toJaw).
+float sdJaw(vec3 j) {
   vec3 m = vec3(abs(j.x), j.yz);
   float d = sdEllipsoid(j - CHIN_C, CHIN_R);
   d = smin(d, sdCapsule(m, JAW_BODY_A, JAW_BODY_B, JAW_BODY_R), 0.1);
   d = smin(d, sdCapsule(m, RAMUS_A, RAMUS_B, RAMUS_R), 0.08);
-  d = smin(d, sdTeeth(j, TEETH_DOWN_C, TEETH_DOWN_ARC), 0.015);
-  return d;
+  return withTeeth(d, j, TEETH_DOWN_C, TEETH_DOWN_ARC, TEETH_DOWN_BOUND);
 }
 
 float map(vec3 p) {
+  float d = sdCranium(p);
   // The jaw never reaches above y = -0.3 (its ramus tops out below the hinge at any angle), so
   // well above that a lower bound on its distance will do and it isn't evaluated.
-  float jaw = p.y > 0.0 ? p.y + 0.3 : sdJaw(p);
-  return min(sdCranium(p), jaw);
+  if (p.y > 0.0) return min(d, p.y + 0.3);
+  // Nor is sdJaw ever below its bounding sphere's distance (lib/skull-bounds.js): where that is no
+  // nearer than the cranium, the min is the cranium.
+  vec3 j = toJaw(p);
+  if (length(j - JAW_BOUND_C) - JAW_BOUND_R >= d) return d;
+  return min(d, sdJaw(j));
 }
 
 vec3 calcNormal(vec3 p) {
