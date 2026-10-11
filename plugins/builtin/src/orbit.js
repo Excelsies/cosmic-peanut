@@ -168,6 +168,7 @@ export default function create(ctx) {
       kick = audio.onset ? Math.min(1, 0.4 + audio.onsetStrength) : kick * Math.exp(-dt * 5);
       const pulse = flash.step(kick, dt, ctx.reduceFlashing);
       bloom.strength = Number(ctx.params.bloom) * (0.5 + 0.5 * pulse);
+      bloom.enabled = bloom.strength > 0; // at 0 it adds exactly nothing
 
       composer.render(dt);
     },

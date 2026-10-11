@@ -522,6 +522,7 @@ export default async function create(ctx) {
       camera.lookAt(0, 0, 0);
 
       bloom.strength = Number(ctx.params.bloom) * 0.8;
+      bloom.enabled = bloom.strength > 0; // at 0 it adds exactly nothing
       composer.render(dt);
     },
 
