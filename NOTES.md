@@ -47,8 +47,12 @@ estimate from the audit, not a measurement here.
   Hyprland and PipeWire, plus main-thread UI runs/s (synthetic 60 Hz / 4 ms load: 60.0 runs/s,
   p50 4.01 ms). The HUD now says host CPU includes WebKit UI work.
 - **Hyprland: a window on a hidden workspace stops rendering.** WebKitGTK never reports the page
-  hidden there, so off screen it kept ~60 UI runs/s and the whole ~57 points of a core plus GPU
-  (measured; the saving itself is not measured yet). `tidalviz.hyprland` follows socket2 (only when
+  hidden there, so off screen it kept ~60 UI runs/s and the whole ~57 points of a core plus GPU.
+  With the fix (Orbit High, synthetic:demo, one run, Firefox video on DP-1, no idle baseline):
+  hidden 0 UI runs/s, system total 58.6 → 8.4 % of a core, WebProcess 15.9 → 0.3, GPU 59.6 W
+  visible → 41.6 W hidden; a closed special workspace 6.1 %. Rendering resumes at once on show
+  (59.8 runs/s), and DP-1's 30 Hz active workspace stays visible (31 runs/s).
+  `tidalviz.hyprland` follows socket2 (only when
   `HYPRLAND_INSTANCE_SIGNATURE` is set; `TIDALVIZ_HYPRLAND_VISIBILITY=0` turns it off) and the host
   sends `windowVisibility`: the shell pauses plugins as for a hidden page, the host stops
   publishing, analysis keeps running. Visible: a monitor's active or open special workspace,
