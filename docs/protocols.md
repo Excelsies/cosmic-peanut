@@ -107,6 +107,9 @@ from the dropped onset) and returns `True`, so the host can time that frame's `o
 Analysis pauses while no renderer is connected. A silent frame equal to the last published one
 apart from frame index and host time is published only once a second; `resume()`, called on every
 client-count change, sends the next one regardless, so a newly connected client gets a frame.
+While the window is off screen (§4 `windowVisibility`) analysis keeps running, so tempo and gain
+stay current, but the host publishes nothing; the first frame after it is shown is a fresh one
+(within the 1 s keepalive when silent).
 
 ## 3. HTTP servers
 
@@ -190,6 +193,7 @@ Host → shell:
 | `updates` | `repos: {repo, commit, message}[]` |
 | `disabled` | `key`, `reason` — hung/crashed plugin was disabled |
 | `display` | `refreshHz` — the window's monitor refresh rate changed (polled 1/s while a shell is connected) |
+| `windowVisibility` | `visible: bool` — whether the window is on screen as far as the host can tell; sent after every `hello` and on every change. Only Hyprland (Linux) is watched (`tidalviz.hyprland`: socket2 events, then `j/clients` + `j/monitors`): hidden means no window of the host process is mapped on a monitor's active or open special workspace, and none is pinned, with no screencast running. Everywhere else, and whenever Hyprland can't be read, it stays `true` (fail open; `TIDALVIZ_HYPRLAND_VISIBILITY=0` turns the watcher off). While `false` the host sends no frames |
 
 `VizInfo = { key, repo, id, name, description, author, renderer, thumbnailUrl|null, params:
 ParamSpec[], values: ParamValues, disabled: bool, dev: bool, entryUrl, pageUrl }`

@@ -74,6 +74,7 @@ def main(argv: list[str] | None = None) -> None:
         source_id=args.source,
         dev=dev,
         bench_key=args.bench,
+        watch_hyprland=sys.platform == "linux",  # WebKitGTK never reports hidden there
     )
     if args.dev is not None:
         host.use_dev_folder(args.dev)

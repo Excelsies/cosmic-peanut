@@ -2,7 +2,10 @@
 
 import asyncio
 import json
+import os
+import shutil
 import sys
+import tempfile
 import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -12,6 +15,8 @@ import aiohttp
 import pytest
 import pytest_asyncio
 
+from tests.test_hyprland import client as hyprland_client
+from tests.test_hyprland_watcher import FakeHyprland
 from tidalviz.host import Host
 
 REPO = Path(__file__).resolve().parent.parent
@@ -730,3 +735,67 @@ async def test_float_on_top_toggle_persists(host: Host, window: FakeWindow, http
     await shell.send({"type": "window", "action": "floatOnTop"})
     await asyncio.sleep(0.2)
     assert host.settings.data["onTop"] is False and window.calls == ["floatOnTop"]
+
+
+@pytest.mark.asyncio
+async def test_a_hidden_window_gets_no_frames_and_the_shell_is_told(host: Host, http):
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    assert await shell.next_json("windowVisibility") == {
+        "type": "windowVisibility",
+        "visible": True,
+    }
+    host.set_window_visible(False)
+    assert await shell.next_json("windowVisibility") == {
+        "type": "windowVisibility",
+        "visible": False,
+    }
+    await asyncio.sleep(0.05)  # frames already on the wire
+    assert await shell.count_frames(0.5) == 0
+    assert not host.pipeline.paused  # analysis keeps running: tempo and gain stay current
+    host.set_window_visible(True)
+    assert await shell.next_json("windowVisibility") == {
+        "type": "windowVisibility",
+        "visible": True,
+    }
+    assert await shell.count_frames(0.5) > 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "linux", reason="Hyprland is Linux-only")
+async def test_under_hyprland_the_window_follows_its_workspace(
+    tmp_path: Path, window: FakeWindow, http, monkeypatch: pytest.MonkeyPatch
+):
+    runtime = Path(tempfile.mkdtemp(prefix="xdg"))  # short: AF_UNIX paths are limited
+    hypr = FakeHyprland(runtime / "hypr" / "sig")
+    hypr.folder.mkdir(parents=True)
+    hypr.clients = [hyprland_client(21, pid=os.getpid())]  # on a workspace no monitor shows
+    await hypr.start()
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    monkeypatch.setenv("HYPRLAND_INSTANCE_SIGNATURE", "sig")
+    monkeypatch.delenv("TIDALVIZ_HYPRLAND_VISIBILITY", raising=False)
+    h = Host(
+        root=tmp_path / "home",
+        builtin_dirs=BUILTINS,
+        source_id="synthetic:demo",
+        window=window,
+        watch_hyprland=True,
+    )
+    await h.start()
+    try:
+        shell = await connect(h, http)  # a shell connecting later learns the current state
+        await shell.next_json("hello")
+        msg = await shell.next_json("windowVisibility")
+        if msg["visible"]:  # connected before the watcher's first look
+            msg = await shell.next_json("windowVisibility")
+        assert msg == {"type": "windowVisibility", "visible": False}
+        hypr.clients = [hyprland_client(1, pid=os.getpid())]
+        await hypr.emit("workspacev2>>1,1")
+        assert await shell.next_json("windowVisibility") == {
+            "type": "windowVisibility",
+            "visible": True,
+        }
+    finally:
+        await h.stop()
+        await hypr.close()
+        shutil.rmtree(runtime, ignore_errors=True)

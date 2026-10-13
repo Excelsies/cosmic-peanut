@@ -7,6 +7,7 @@ GUI-free so it can be tested with a real WebSocket client; the window is injecte
 import asyncio
 import contextlib
 import logging
+import os
 import struct
 import subprocess
 import sys
@@ -14,7 +15,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Coroutine, Sequence
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 import psutil
@@ -35,6 +36,9 @@ from tidalviz.plugins.registry import PendingInstall
 from tidalviz.server.runner import DEFAULT_WEB_DIR, HostServers
 from tidalviz.settings import Settings
 from tidalviz.transport.control import HANG_AFTER_S, TextSocket
+
+if TYPE_CHECKING:
+    from tidalviz.hyprland import HyprlandWatcher
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +117,7 @@ class Host:
         fetcher: GitFetcher | None = None,
         open_url: Callable[[str], None] = open_url,
         bench_key: str | None = None,
+        watch_hyprland: bool = False,
     ) -> None:
         root.mkdir(parents=True, exist_ok=True)
         self.settings = Settings(root / "settings.json")
@@ -155,6 +160,11 @@ class Host:
             on_manifest_errors=self._dev_manifest_errors,
         )
         self.pipeline: AudioPipeline | None = None
+        # Whether the window is on screen (Linux/Hyprland: `hyprland.py`; elsewhere always).
+        # Read by the analysis thread; frames aren't published while it is False.
+        self._window_visible = True
+        self._watch_hyprland = watch_hyprland
+        self._hyprland: HyprlandWatcher | None = None  # imported on Linux only
 
     # --- lifecycle ------------------------------------------------------------------------
 
@@ -169,6 +179,12 @@ class Host:
         self.watcher.start()
         self._process.cpu_percent(None)  # prime: the first call always returns 0
         self._stats_task = asyncio.create_task(self._stats_loop())
+        if sys.platform == "linux" and self._watch_hyprland:
+            from tidalviz.hyprland import watcher_from_env
+
+            self._hyprland = watcher_from_env(os.getpid(), self.set_window_visible)
+            if self._hyprland is not None:
+                self._hyprland.start()
 
     def _initial_source(self) -> AudioSource:
         """The saved source, or system audio if it is gone (an app:<pid> whose app quit)."""
@@ -188,6 +204,8 @@ class Host:
         return make_source("system")
 
     async def stop(self) -> None:
+        if self._hyprland is not None:
+            await self._hyprland.stop()
         if self._stats_task is not None:
             self._stats_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -198,7 +216,10 @@ class Host:
         await self.servers.stop()
 
     def _publish(self, data: bytes) -> None:
-        """Analysis thread → event loop; the hub keeps only the newest frame."""
+        """Analysis thread → event loop; the hub keeps only the newest frame. Nothing goes out
+        while the window is off screen (analysis keeps running, so tempo and gain stay current)."""
+        if not self._window_visible:
+            return
         if data[6] & 1:  # onset flag (protocols §1)
             self._record_onset(data)
         loop = self._loop
@@ -206,6 +227,8 @@ class Host:
             loop.call_soon_threadsafe(self._deliver, data)
 
     def _deliver(self, data: bytes) -> None:
+        if not self._window_visible:  # hidden after this frame was handed over
+            return
         if self.servers.hub.publish(data):  # carried a dropped frame's onset onto this one
             self._record_onset(data)
 
@@ -297,9 +320,21 @@ class Host:
     async def _greet(self, client: TextSocket) -> None:
         apps = await asyncio.to_thread(audio_apps)
         await self.servers.control.send_json(client, self.hello(apps))
+        await self.servers.control.send_json(client, self._window_visibility())
         notices, self._notices = self._notices, []
         for msg in notices:
             await self.servers.control.send_json(client, msg)
+
+    def set_window_visible(self, visible: bool) -> None:
+        """On the loop: the window went on or off screen. Tells the shell, which pauses or
+        resumes its plugins (docs/protocols.md §4 `windowVisibility`)."""
+        if visible == self._window_visible:
+            return
+        self._window_visible = visible
+        self._spawn(self.servers.control.broadcast_json(self._window_visibility()))
+
+    def _window_visibility(self) -> dict[str, Any]:
+        return {"type": "windowVisibility", "visible": self._window_visible}
 
     def _on_hang(self) -> None:
         """No heartbeat for 2 s: a plugin froze the shared WebContent process (spike).
