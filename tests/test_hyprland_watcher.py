@@ -133,16 +133,24 @@ async def test_reports_hidden_and_shown_as_our_window_leaves_and_returns(hypr, w
 
 
 @pytest.mark.asyncio
-async def test_a_burst_of_events_costs_one_look(hypr, watch):
-    _, changes = watch()
-    await until(lambda: len(hypr.requests) == 2)
-    hypr.clients = [client(21)]
-    await hypr.emit(
-        "workspace>>4", "workspacev2>>4,4", "focusedmon>>OUT-1,4", "focusedmonv2>>OUT-1,4"
-    )
-    await until(lambda: changes == [False])
-    await asyncio.sleep(0.1)
-    assert sorted(hypr.requests) == ["j/clients"] * 2 + ["j/monitors"] * 2
+async def test_the_first_event_is_looked_at_at_once_and_the_rest_of_its_burst_once(
+    hypr, folder: Path
+):
+    changes = Changes()
+    w = HyprlandWatcher(folder, PID, changes, debounce=0.3)
+    w.start()
+    try:
+        await until(lambda: len(hypr.requests) == 2)
+        await asyncio.sleep(0.35)  # quiet for longer than the debounce
+        hypr.clients = [client(21)]
+        await hypr.emit(
+            "workspace>>4", "workspacev2>>4,4", "focusedmon>>OUT-1,4", "focusedmonv2>>OUT-1,4"
+        )
+        await until(lambda: changes == [False], timeout=0.2)  # no debounce wait
+        await asyncio.sleep(0.4)
+        assert sorted(hypr.requests) == ["j/clients"] * 3 + ["j/monitors"] * 3
+    finally:
+        await w.stop()
 
 
 @pytest.mark.asyncio

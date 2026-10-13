@@ -28,7 +28,7 @@ EVENTS = frozenset(
         "monitorremovedv2", "screencast",
     }
 )  # fmt: skip
-DEBOUNCE_S = 0.075  # a workspace switch emits 2-6 events at once: one look after the burst
+DEBOUNCE_S = 0.075  # looks at least this far apart: a workspace switch emits 2-6 events at once
 BACKOFF_S = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0)  # reconnect delays; the last one repeats
 STABLE_S = 5.0  # an event connection up this long was healthy: backoff and warning start over
 TIMEOUT_S = 2.0  # one request (connect, send, read to EOF)
@@ -80,8 +80,9 @@ class HyprlandWatcher:
     """Follows Hyprland's event socket and calls ``on_change(visible)`` when our window goes
     on or off screen (starting from visible). Lives on the asyncio loop: `start`, then `stop`.
 
-    After a relevant event (debounced), it asks `.socket.sock` for `j/clients` and `j/monitors`
-    and applies `window_visible`. When Hyprland can't be reached, or answers unexpectedly, it
+    After a relevant event it asks `.socket.sock` for `j/clients` and `j/monitors` and applies
+    `window_visible`: at once for the first event after a quiet spell (no stale frame on a switch
+    in), then once more for the rest of its burst, so looks are at least ``debounce`` apart. When Hyprland can't be reached, or answers unexpectedly, it
     reads as visible, logs once, and reconnects with ``backoff``.
     """
 
@@ -147,29 +148,31 @@ class HyprlandWatcher:
             await asyncio.sleep(self._backoff[min(failures, len(self._backoff) - 1)])
 
     async def _watch(self) -> None:
-        """Read events until the socket closes; look again after each burst of relevant ones."""
+        """Read events until the socket closes, looking on connect and after relevant ones."""
         reader, writer = await asyncio.open_unix_connection(
             self.socket_dir / ".socket2.sock", limit=MAX_LINE
         )
         try:
-            self._connected_at = asyncio.get_running_loop().time()
-            await self._look()
             loop = asyncio.get_running_loop()
-            due: float | None = None  # when the pending look runs
+            self._connected_at = loop.time()
+            due: float | None = loop.time()  # when the pending look runs; the first: now
+            looked = due  # when the last look started
             while True:
+                if due is not None and due <= loop.time():
+                    due = None
+                    looked = loop.time()
+                    await self._look()
                 try:
                     wait = None if due is None else max(0.0, due - loop.time())
                     line = await asyncio.wait_for(reader.readline(), wait)
-                except TimeoutError:
-                    due = None
-                    await self._look()
+                except TimeoutError:  # the pending look is due
                     continue
                 except ValueError:  # a line over MAX_LINE: skipped
                     continue
                 if not line:
                     return
                 if self._relevant(line) and due is None:
-                    due = loop.time() + self._debounce
+                    due = looked + self._debounce  # in the past after a quiet spell: at once
         finally:
             writer.close()
             with contextlib.suppress(Exception):
