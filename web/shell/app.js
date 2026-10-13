@@ -728,6 +728,8 @@ export function createApp(deps) {
         renderSettings();
         renderSources();
         armCycle();
+        // The host's watchdog keeps the last `visibility` across reconnects: restate it.
+        send({ type: "visibility", visible: visible() });
         if (msg.settings.photosensitivityNoticeSeen !== true) {
           notice.hidden = false;
           noticeOk.focus();

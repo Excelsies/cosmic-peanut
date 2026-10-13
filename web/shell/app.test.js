@@ -621,6 +621,7 @@ describe("app: visibility", () => {
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
     document.dispatchEvent(new Event("visibilitychange"));
     expect(sent.filter((m) => m.type === "visibility")).toEqual([
+      { type: "visibility", visible: true }, // on hello
       { type: "visibility", visible: false },
       { type: "visibility", visible: true },
     ]);
@@ -639,6 +640,7 @@ describe("app: visibility", () => {
     expect(host.deps.visible()).toBe(true);
     expect(host.setVisible.mock.calls).toEqual([[false], [true]]);
     expect(sent.filter((m) => m.type === "visibility")).toEqual([
+      { type: "visibility", visible: true }, // on hello
       { type: "visibility", visible: false },
       { type: "visibility", visible: true },
     ]);
@@ -677,6 +679,18 @@ describe("app: visibility", () => {
     expect(host.show).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1_000);
     expect(host.show).toHaveBeenLastCalledWith(B, {});
+  });
+
+  it("every connection tells the host the shell's visibility, so a reconnect while hidden is no hang", () => {
+    const { app, sent } = setup();
+    app.handle(hello());
+    expect(sent.filter((m) => m.type === "visibility")).toEqual([{ type: "visibility", visible: true }]);
+    app.handle({ type: "windowVisibility", visible: false });
+    sent.length = 0;
+    app.handle(hello()); // the control socket reconnected; the page did not reload
+    app.handle({ type: "windowVisibility", visible: false }); // unchanged: nothing more to send
+    // The host keeps its watchdog state across connections; without this it would arm on connect.
+    expect(sent.filter((m) => m.type === "visibility")).toEqual([{ type: "visibility", visible: false }]);
   });
 
   it("a hello re-arms auto-cycle only while the window is on screen", () => {
