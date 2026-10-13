@@ -5,6 +5,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 import shutil
 import tempfile
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -25,6 +26,8 @@ class FakeHyprland:
         self.monitors: Any = MONITORS
         self.requests: list[str] = []
         self.listeners: list[asyncio.StreamWriter] = []
+        self.connects = 0  # to the event socket
+        self.drop = False  # accept an event connection, then close it at once
         self._servers: list[asyncio.Server] = []
 
     async def start(self) -> None:
@@ -37,11 +40,17 @@ class FakeHyprland:
         cmd = (await r.read(1024)).decode()
         self.requests.append(cmd)
         reply = {"j/clients": self.clients, "j/monitors": self.monitors}.get(cmd)
-        w.write(b"unknown request" if reply is None else json.dumps(reply).encode())
+        if reply is None:
+            reply = b"unknown request"
+        w.write(reply if isinstance(reply, bytes) else json.dumps(reply).encode())
         await w.drain()
         w.close()
 
     async def _events(self, r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+        self.connects += 1
+        if self.drop:
+            w.close()
+            return
         self.listeners.append(w)
         with contextlib.suppress(ConnectionError):
             await r.read()  # held open until the client leaves or `hang_up`
@@ -180,6 +189,42 @@ async def test_fails_open_when_hyprland_goes_away_and_picks_up_again(hypr, watch
     await hypr.hang_up()
     await until(lambda: changes == [False, True])
     await until(lambda: changes == [False, True, False])  # reconnected after the backoff
+
+
+@pytest.mark.asyncio
+async def test_an_event_socket_that_keeps_dropping_backs_off_and_warns_once(
+    hypr, folder: Path, caplog: pytest.LogCaptureFixture
+):
+    hypr.drop = True  # accepts, then closes: a connect that never turns into a working stream
+    w = HyprlandWatcher(folder, PID, Changes(), debounce=0.02, backoff=(0.05, 0.1, 0.2, 0.4))
+    with caplog.at_level(logging.DEBUG, logger="tidalviz.hyprland"):
+        w.start()
+        try:
+            await asyncio.sleep(0.6)
+        finally:
+            await w.stop()
+    assert 2 <= hypr.connects <= 4  # 0, 0.1, 0.3 s; without backing off, one every 0.05 s
+    assert len([r for r in caplog.records if r.levelno >= logging.WARNING]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_drop_after_a_healthy_connection_warns_again(
+    hypr, folder: Path, caplog: pytest.LogCaptureFixture
+):
+    def warnings() -> int:
+        return len([r for r in caplog.records if r.levelno >= logging.WARNING])
+
+    w = HyprlandWatcher(folder, PID, Changes(), backoff=(0.05,), stable_after=0.1)
+    with caplog.at_level(logging.DEBUG, logger="tidalviz.hyprland"):
+        w.start()
+        try:
+            for n in (1, 2):
+                await until(lambda n=n: hypr.connects == n and len(hypr.listeners) == 1)
+                await asyncio.sleep(0.15)  # healthy
+                await hypr.hang_up()
+                await until(lambda n=n: warnings() == n)
+        finally:
+            await w.stop()
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,7 @@ EVENTS = frozenset(
 )  # fmt: skip
 DEBOUNCE_S = 0.075  # a workspace switch emits 2-6 events at once: one look after the burst
 BACKOFF_S = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0)  # reconnect delays; the last one repeats
+STABLE_S = 5.0  # an event connection up this long was healthy: backoff and warning start over
 TIMEOUT_S = 2.0  # one request (connect, send, read to EOF)
 MAX_REPLY = 4 * 1024 * 1024
 MAX_LINE = 1024 * 1024
@@ -93,6 +94,7 @@ class HyprlandWatcher:
         debounce: float = DEBOUNCE_S,
         backoff: Sequence[float] = BACKOFF_S,
         timeout: float = TIMEOUT_S,
+        stable_after: float = STABLE_S,
     ) -> None:
         self.socket_dir = socket_dir
         self._pid = pid
@@ -100,9 +102,10 @@ class HyprlandWatcher:
         self._debounce = debounce
         self._backoff = tuple(backoff)
         self._timeout = timeout
+        self._stable_after = stable_after
         self._visible = True
         self._screencasts = 0
-        self._connected = False
+        self._connected_at: float | None = None  # loop time the event socket connected
         self._warned = False
         self._task: asyncio.Task[None] | None = None
 
@@ -124,7 +127,7 @@ class HyprlandWatcher:
     async def _run(self) -> None:
         failures = 0
         while True:  # ends when stop() cancels the task
-            self._connected = False
+            self._connected_at = None
             try:
                 await self._watch()
                 problem = "Hyprland event socket closed"
@@ -133,10 +136,14 @@ class HyprlandWatcher:
             except Exception:  # never let a bug leave the window marked hidden
                 log.exception("Hyprland watcher failed")
                 problem = "Hyprland watcher failed"
+            # A socket that accepts and drops at once is still failing: keep backing off.
+            stable = self._stable()
             self._screencasts = 0
             self._set(True)
+            if stable:
+                self._warned = False  # news after a healthy run
             self._report(problem)
-            failures = 0 if self._connected else failures + 1
+            failures = 0 if stable else failures + 1
             await asyncio.sleep(self._backoff[min(failures, len(self._backoff) - 1)])
 
     async def _watch(self) -> None:
@@ -145,7 +152,7 @@ class HyprlandWatcher:
             self.socket_dir / ".socket2.sock", limit=MAX_LINE
         )
         try:
-            self._connected = True
+            self._connected_at = asyncio.get_running_loop().time()
             await self._look()
             loop = asyncio.get_running_loop()
             due: float | None = None  # when the pending look runs
@@ -188,7 +195,8 @@ class HyprlandWatcher:
             self._report(f"Hyprland request failed ({e})")
             self._set(True)
             return
-        self._warned = False
+        if self._stable():
+            self._warned = False
         self._set(window_visible(clients, monitors, self._pid, screencast=self._screencasts > 0))
 
     async def _request(self, command: str) -> list[Any]:
@@ -212,6 +220,10 @@ class HyprlandWatcher:
             raise ValueError(f"{command}: unexpected reply")
         return cast(list[Any], data)
 
+    def _stable(self) -> bool:
+        since = self._connected_at
+        return since is not None and asyncio.get_running_loop().time() - since >= self._stable_after
+
     def _set(self, visible: bool) -> None:
         if visible == self._visible:
             return
@@ -223,7 +235,8 @@ class HyprlandWatcher:
             log.exception("Hyprland visibility callback failed")
 
     def _report(self, problem: str) -> None:
-        """Warn once per run of failures (reset by a successful look); then debug."""
+        """Warn once per run of failures (until the event socket has stayed up `stable_after`
+        and a look succeeds, or it drops after that); then debug."""
         if self._warned:
             log.debug("%s", problem)
             return
