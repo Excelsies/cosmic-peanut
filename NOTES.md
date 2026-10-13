@@ -46,6 +46,15 @@ estimate from the audit, not a measurement here.
 - `tools/thread_profile.py` (Linux): per-thread CPU and wakeups for tidalviz, its WebKit processes,
   Hyprland and PipeWire, plus main-thread UI runs/s (synthetic 60 Hz / 4 ms load: 60.0 runs/s,
   p50 4.01 ms). The HUD now says host CPU includes WebKit UI work.
+- **Hyprland: a window on a hidden workspace stops rendering.** WebKitGTK never reports the page
+  hidden there, so off screen it kept ~60 UI runs/s and the whole ~57 points of a core plus GPU
+  (measured; the saving itself is not measured yet). `tidalviz.hyprland` follows socket2 (only when
+  `HYPRLAND_INSTANCE_SIGNATURE` is set; `TIDALVIZ_HYPRLAND_VISIBILITY=0` turns it off) and the host
+  sends `windowVisibility`: the shell pauses plugins as for a hidden page, the host stops
+  publishing, analysis keeps running. Visible: a monitor's active or open special workspace,
+  pinned, a screencast seen starting, our window not listed, any read failure. Gaps: overview
+  plugins (hyprexpo) show a paused frame; group tabs, occlusion and DPMS-off still count as
+  visible; a screencast started before launch is not seen. macOS is unchanged.
 
 **Shell and SDK**
 - **Throttle click: the shell decides.** Active iframe only, 15–35 fps and
