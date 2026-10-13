@@ -37,7 +37,8 @@
  *   | { type: "installResult"; id: string; ok: boolean; error?: string }
  *   | { type: "updates"; repos: { repo: string; commit: string; message: string }[] }
  *   | { type: "disabled"; key: string; reason: string }
- *   | { type: "display"; refreshHz: number }} HostMessage
+ *   | { type: "display"; refreshHz: number }
+ *   | { type: "windowVisibility"; visible: boolean }} HostMessage
  *
  * @typedef {{ fps: number; frameMsP50: number; frameMsP99: number; pluginMsP50: number;
  *   renderScale: number; dropped: number }} PluginPerf
@@ -283,6 +284,8 @@ export function parseHostMessage(text) {
       return isStr(m.key) && isStr(m.reason) ? { type: "disabled", key: m.key, reason: m.reason } : null;
     case "display":
       return isNum(m.refreshHz) && m.refreshHz >= 0 ? { type: "display", refreshHz: m.refreshHz } : null;
+    case "windowVisibility":
+      return isBool(m.visible) ? { type: "windowVisibility", visible: m.visible } : null;
     default:
       return null;
   }

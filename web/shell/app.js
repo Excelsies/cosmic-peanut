@@ -78,6 +78,10 @@ export function createApp(deps) {
   /** @type {Element | null} */ let returnFocus = null;
   /** @type {string | null} */ let installId = null;
   /** @type {ReturnType<typeof setInterval> | undefined} */ let cycleTimer;
+  // The host's view of the window (`windowVisibility`): on Hyprland the page is never "hidden"
+  // even when its workspace isn't shown. Visible means both the page and the host say so.
+  let hostVisible = true;
+  const visible = () => hostVisible && doc.visibilityState !== "hidden";
   let connectionMessage = false;
   /** Visualizer whose error the overlay shows. @type {string | null} */ let errorKey = null;
 
@@ -227,7 +231,7 @@ export function createApp(deps) {
   const pluginHost = (deps.createPluginHost ?? createPluginHost)({
     container: vizLayer,
     settings: { quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, refreshHz) },
-    visible: () => doc.visibilityState !== "hidden",
+    visible,
     onEvent,
   });
 
@@ -434,7 +438,7 @@ export function createApp(deps) {
   function armCycle() {
     clearInterval(cycleTimer);
     cycleTimer = undefined;
-    if (settings.autoCycleSeconds > 0 && doc.visibilityState !== "hidden") {
+    if (settings.autoCycleSeconds > 0 && visible()) {
       cycleTimer = setInterval(() => step(1), settings.autoCycleSeconds * 1000);
     }
   }
@@ -678,13 +682,15 @@ export function createApp(deps) {
       }
     }, 0);
   });
-  doc.addEventListener("visibilitychange", () => {
-    const visible = doc.visibilityState !== "hidden";
-    pluginHost.setVisible(visible);
+  /** Plugins stop rendering, ready timers and auto-cycle wait, the host's watchdog pauses. */
+  function applyVisibility() {
+    const v = visible();
+    pluginHost.setVisible(v);
     armCycle();
     // Hidden pages' timers are throttled past the hang threshold: the host pauses its watchdog.
-    send({ type: "visibility", visible });
-  });
+    send({ type: "visibility", visible: v });
+  }
+  doc.addEventListener("visibilitychange", applyVisibility);
   sourceSel.addEventListener("change", () => {
     activeSource = sourceSel.value;
     send({ type: "setSource", id: sourceSel.value });
@@ -802,6 +808,12 @@ export function createApp(deps) {
         else renderLib();
         break;
       }
+      case "windowVisibility":
+        if (msg.visible !== hostVisible) {
+          hostVisible = msg.visible;
+          applyVisibility();
+        }
+        break;
       case "display": {
         const before = qualityProfile(settings.quality, refreshHz).fpsCap;
         refreshHz = msg.refreshHz;

@@ -626,4 +626,66 @@ describe("app: visibility", () => {
     ]);
     expect(host.setVisible.mock.calls).toEqual([[false], [true]]);
   });
+
+  it("a window the host reports off screen pauses plugins like a hidden page", () => {
+    const { app, sent, host } = setup();
+    app.handle(hello());
+    expect(host.deps.visible()).toBe(true);
+    app.handle({ type: "windowVisibility", visible: true }); // after every hello: no change
+    expect(host.setVisible).not.toHaveBeenCalled();
+    app.handle({ type: "windowVisibility", visible: false });
+    expect(host.deps.visible()).toBe(false); // new iframes start hidden, ready timers wait
+    app.handle({ type: "windowVisibility", visible: true });
+    expect(host.deps.visible()).toBe(true);
+    expect(host.setVisible.mock.calls).toEqual([[false], [true]]);
+    expect(sent.filter((m) => m.type === "visibility")).toEqual([
+      { type: "visibility", visible: false },
+      { type: "visibility", visible: true },
+    ]);
+  });
+
+  it("visible means both the page and the host say so", () => {
+    const { app, host } = setup();
+    app.handle(hello());
+    const page = (/** @type {boolean} */ v) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (v ? "visible" : "hidden") });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      app.handle({ type: "windowVisibility", visible: false });
+      page(false);
+      page(true); // the page is back but the window is still off screen
+      expect(host.deps.visible()).toBe(false);
+      expect(host.setVisible).toHaveBeenLastCalledWith(false);
+      app.handle({ type: "windowVisibility", visible: true });
+      expect(host.setVisible).toHaveBeenLastCalledWith(true);
+    } finally {
+      page(true);
+    }
+  });
+
+  it("auto-cycle pauses while the host reports the window off screen", () => {
+    const { app, host } = setup();
+    app.handle(hello({ settings: { photosensitivityNoticeSeen: true, autoCycleSeconds: 30 } }));
+    vi.advanceTimersByTime(20_000);
+    app.handle({ type: "windowVisibility", visible: false });
+    host.show.mockClear();
+    vi.advanceTimersByTime(120_000);
+    expect(host.show).not.toHaveBeenCalled();
+    app.handle({ type: "windowVisibility", visible: true }); // a fresh interval
+    vi.advanceTimersByTime(29_000);
+    expect(host.show).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1_000);
+    expect(host.show).toHaveBeenLastCalledWith(B, {});
+  });
+
+  it("a hello re-arms auto-cycle only while the window is on screen", () => {
+    const { app, host } = setup();
+    app.handle(hello({ settings: { photosensitivityNoticeSeen: true, autoCycleSeconds: 30 } }));
+    app.handle({ type: "windowVisibility", visible: false });
+    app.handle(hello({ settings: { photosensitivityNoticeSeen: true, autoCycleSeconds: 30 } })); // reconnect
+    host.show.mockClear();
+    vi.advanceTimersByTime(120_000);
+    expect(host.show).not.toHaveBeenCalled();
+  });
 });

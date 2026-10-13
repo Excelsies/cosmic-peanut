@@ -118,6 +118,7 @@ describe("parseHostMessage", () => {
       { type: "updates", repos: [{ repo: "r", commit: "c", message: "m" }] },
       { type: "disabled", key: "k", reason: "hung" },
       { type: "display", refreshHz: 30 },
+      { type: "windowVisibility", visible: false },
     ];
     for (const m of ok) expect(parseHostMessage(JSON.stringify(m))).toEqual(m);
     const bad = [
@@ -129,6 +130,8 @@ describe("parseHostMessage", () => {
       { type: "disabled", key: "k" },
       { type: "display", refreshHz: -30 },
       { type: "display" },
+      { type: "windowVisibility", visible: "no" },
+      { type: "windowVisibility" },
     ];
     for (const m of bad) expect(parseHostMessage(JSON.stringify(m))).toBeNull();
   });

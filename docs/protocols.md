@@ -193,7 +193,7 @@ Host → shell:
 | `updates` | `repos: {repo, commit, message}[]` |
 | `disabled` | `key`, `reason` — hung/crashed plugin was disabled |
 | `display` | `refreshHz` — the window's monitor refresh rate changed (polled 1/s while a shell is connected) |
-| `windowVisibility` | `visible: bool` — whether the window is on screen as far as the host can tell; sent after every `hello` and on every change. Only Hyprland (Linux) is watched (`tidalviz.hyprland`: socket2 events, then `j/clients` + `j/monitors`): hidden means no window of the host process is mapped on a monitor's active or open special workspace, and none is pinned, with no screencast running. Everywhere else, and whenever Hyprland can't be read, it stays `true` (fail open; `TIDALVIZ_HYPRLAND_VISIBILITY=0` turns the watcher off). While `false` the host sends no frames |
+| `windowVisibility` | `visible: bool` — whether the window is on screen as far as the host can tell; sent after every `hello` and on every change. Only Hyprland (Linux) is watched (`tidalviz.hyprland`: socket2 events, then `j/clients` + `j/monitors`): hidden means no window of the host process is mapped on a monitor's active or open special workspace, and none is pinned, with no screencast running. Everywhere else, and whenever Hyprland can't be read, it stays `true` (fail open; `TIDALVIZ_HYPRLAND_VISIBILITY=0` turns the watcher off). While `false` the host sends no frames. The shell treats the window as visible only when this and `document.visibilityState` both say so; either one hiding it pauses plugins (§5 `visibility`), the ready timeout and auto-cycle, and sends `visibility` |
 
 `VizInfo = { key, repo, id, name, description, author, renderer, thumbnailUrl|null, params:
 ParamSpec[], values: ParamValues, disabled: bool, dev: bool, entryUrl, pageUrl }`
@@ -205,7 +205,7 @@ Shell → host:
 | type | Fields |
 | --- | --- |
 | `heartbeat` | `t` — every 500 ms; 2 s without one (counted from connect or the last heartbeat, while ≥1 client is connected) ⇒ host reloads the web view with the active visualizer disabled |
-| `visibility` | `visible` — the window was hidden/minimized or shown; the hang watchdog pauses while hidden (WebKit throttles hidden pages' timers past 2 s) |
+| `visibility` | `visible` — the window was hidden/minimized or shown (the page's visibility AND the host's `windowVisibility`); the hang watchdog pauses while hidden (WebKit throttles hidden pages' timers past 2 s) |
 | `select` | `key` — active visualizer changed (persisted) |
 | `params` | `key`, `values` (full set, persisted) |
 | `setSource` | `id` |
