@@ -19,7 +19,9 @@ log = logging.getLogger(__name__)
 
 # socket2 events after which our window may have appeared on or left a monitor. Deliberately
 # not activewindow/windowtitle (several per second while a terminal title animates), fullscreen
-# or changefloatingmode (they don't move a window between workspaces).
+# or changefloatingmode (they don't move a window between workspaces). Only `screencast` is
+# counted: 0.56.2 posts `screencastv2` alongside every one (ScreenshareSession.cpp), so counting
+# both would count each cast twice.
 EVENTS = frozenset(
     {
         "workspace", "workspacev2", "focusedmon", "focusedmonv2", "activespecial",

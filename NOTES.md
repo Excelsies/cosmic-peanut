@@ -54,7 +54,10 @@ estimate from the audit, not a measurement here.
   publishing, analysis keeps running. Visible: a monitor's active or open special workspace,
   pinned, a screencast seen starting, our window not listed, any read failure. Gaps: overview
   plugins (hyprexpo) show a paused frame; group tabs, occlusion and DPMS-off still count as
-  visible; a screencast started before launch is not seen. macOS is unchanged.
+  visible; a screencast started before launch is seen only when it next resumes after a 500 ms
+  pause in its frames (Hyprland re-sends `screencast` per session then); under XWayland
+  (`GDK_BACKEND=x11`) a window that moves itself to a shown workspace sends no event, so it stays
+  paused until the next one. macOS is unchanged.
 
 **Shell and SDK**
 - **Throttle click: the shell decides.** Active iframe only, 15–35 fps and
