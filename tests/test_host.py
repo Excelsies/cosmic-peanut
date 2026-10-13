@@ -762,6 +762,27 @@ async def test_a_hidden_window_gets_no_frames_and_the_shell_is_told(host: Host, 
 
 
 @pytest.mark.asyncio
+async def test_a_silent_stream_sends_a_fresh_frame_as_soon_as_the_window_is_shown(
+    tmp_path: Path, window: FakeWindow, http
+):
+    h = Host(
+        root=tmp_path / "home", builtin_dirs=BUILTINS, source_id="synthetic:silence", window=window
+    )
+    await h.start()
+    try:
+        shell = await connect(h, http)
+        await shell.next_json("hello")
+        # Silence: the connect's frame (maybe already counted under hello), then one a second.
+        assert shell.frames + await shell.count_frames(0.2) == 1
+        h.set_window_visible(False)
+        await asyncio.sleep(1.0)  # the keepalive frame is dropped while hidden
+        h.set_window_visible(True)
+        assert await shell.count_frames(0.3) == 1  # not at the next keepalive, ~1 s later
+    finally:
+        await h.stop()
+
+
+@pytest.mark.asyncio
 @pytest.mark.skipif(sys.platform != "linux", reason="Hyprland is Linux-only")
 async def test_under_hyprland_the_window_follows_its_workspace(
     tmp_path: Path, window: FakeWindow, http, monkeypatch: pytest.MonkeyPatch

@@ -108,8 +108,8 @@ Analysis pauses while no renderer is connected. A silent frame equal to the last
 apart from frame index and host time is published only once a second; `resume()`, called on every
 client-count change, sends the next one regardless, so a newly connected client gets a frame.
 While the window is off screen (§4 `windowVisibility`) analysis keeps running, so tempo and gain
-stay current, but the host publishes nothing; the first frame after it is shown is a fresh one
-(within the 1 s keepalive when silent).
+stay current, but the host publishes nothing; showing it calls `resume()` (while a client is
+connected), so a fresh frame follows at once even when silent.
 
 ## 3. HTTP servers
 

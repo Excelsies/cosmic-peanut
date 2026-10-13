@@ -331,6 +331,8 @@ class Host:
         if visible == self._window_visible:
             return
         self._window_visible = visible
+        if visible and self.pipeline is not None and self.servers.control.client_count:
+            self.pipeline.resume()  # a fresh frame now, not at a silent stream's next keepalive
         self._spawn(self.servers.control.broadcast_json(self._window_visibility()))
 
     def _window_visibility(self) -> dict[str, Any]:
