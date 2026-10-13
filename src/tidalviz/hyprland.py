@@ -191,13 +191,14 @@ class HyprlandWatcher:
         try:
             clients = await self._request("j/clients")
             monitors = await self._request("j/monitors")
-        except (OSError, TimeoutError, ValueError) as e:
-            self._report(f"Hyprland request failed ({e})")
+            visible = window_visible(clients, monitors, self._pid, screencast=self._screencasts > 0)
+        except Exception as e:  # unreachable, slow, or a reply that breaks json (RecursionError)
+            self._report(f"Hyprland request failed ({e!r})")
             self._set(True)
             return
         if self._stable():
             self._warned = False
-        self._set(window_visible(clients, monitors, self._pid, screencast=self._screencasts > 0))
+        self._set(visible)
 
     async def _request(self, command: str) -> list[Any]:
         """One request on `.socket.sock` (Hyprland answers, then closes). JSON list or raises."""

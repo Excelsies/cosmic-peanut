@@ -182,6 +182,22 @@ async def test_an_unexpected_reply_reads_as_visible(hypr, watch):
 
 
 @pytest.mark.asyncio
+async def test_a_reply_that_breaks_the_json_parser_is_just_a_failed_look(
+    hypr, watch, caplog: pytest.LogCaptureFixture
+):
+    hypr.clients = [client(21)]
+    _, changes = watch()
+    await until(lambda: changes == [False])
+    hypr.clients = b"[" * 200_000  # json.loads: RecursionError
+    with caplog.at_level(logging.DEBUG, logger="tidalviz.hyprland"):
+        await hypr.emit("openwindow>>0x2,4,class,title")
+        await until(lambda: changes == [False, True])
+        await asyncio.sleep(0.1)
+    assert hypr.connects == 1  # still on the same event connection
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+@pytest.mark.asyncio
 async def test_fails_open_when_hyprland_goes_away_and_picks_up_again(hypr, watch):
     hypr.clients = [client(21)]
     _, changes = watch()
