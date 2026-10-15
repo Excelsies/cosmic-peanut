@@ -15,6 +15,7 @@ VALID: list[dict[str, Any]] = [
     {"type": "settings", "quality": "auto"},
     {"type": "settings", "reduceFlashing": True, "autoCycleSeconds": 30, "hudVisible": False},
     {"type": "settings", "somethingNew": [1, 2]},
+    {"type": "settings", "backgroundOpacity": 0, "visualOpacity": 0.5},
     {"type": "pluginError", "key": "a/b", "message": "boom", "fatal": False},
     {
         "type": "pluginError",
@@ -64,6 +65,10 @@ INVALID: list[dict[str, Any]] = [
     {"type": "settings", "reduceFlashing": "yes"},
     {"type": "settings", "autoCycleSeconds": "30"},
     {"type": "settings", "hudVisible": 1},
+    {"type": "settings", "backgroundOpacity": "0.5"},
+    {"type": "settings", "visualOpacity": "0.5"},
+    {"type": "settings", "backgroundOpacity": float("nan")},
+    {"type": "settings", "visualOpacity": float("nan")},
     {"type": "pluginError", "key": "a/b", "message": "boom"},
     {"type": "pluginError", "key": "a/b", "message": {"html": 1}, "fatal": False},
     {"type": "pluginError", "key": "a/b", "message": "m", "line": "3", "fatal": False},

@@ -47,6 +47,22 @@ before the first block, for a sink waking from suspend); silent audio still stre
   kept); a Qt backend (WebEngine is Chromium, 524 MB); PyGObject as a default dependency (a bare
   `uv sync` would fail without headers), hence the `gtk` extra.
 
+## Background and visual opacity (2026-10-02)
+
+Two persisted settings, `backgroundOpacity` (0–1, default 0) and `visualOpacity` (0.1–1, default
+1), live only while *Transparent background* is on.
+
+- **Two sliders, and the visual's goes on a `.viz-layer` wrapper.** *Transparent background* only
+  removes the black backdrop, but most visualizers paint nearly every pixel, so the window stays
+  opaque. The backdrop alpha sits on the stage background. The visual opacity sits on a new
+  `.viz-layer` around the plugin iframes, not on `.stage` (that would fade the backdrop too) and not
+  on each iframe (the plugin host animates their inline `opacity` for the crossfade).
+- **Fade live on `input`, save on `change`.** Each `settings` message rewrites settings.json.
+- Visual stops at 0.1 so the visual can fade but never vanish; Background has no floor.
+
+Known gap: not run on macOS, and the GPU cost of the extra compositing layer below opacity 1 is
+unmeasured.
+
 ## Visualizer batch: Tentacube, Tie-Dye, Skull Trip, Dark Sun, Eclipse, Marbling, Laminar, Tetraballs (2026-09-28)
 
 Built in parallel worktrees and merged one at a time. GPU times were measured on the M4 Pro at

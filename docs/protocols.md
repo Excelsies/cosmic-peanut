@@ -190,7 +190,7 @@ Shell → host:
 | `select` | `key` — active visualizer changed (persisted) |
 | `params` | `key`, `values` (full set, persisted) |
 | `setSource` | `id` |
-| `settings` | partial settings object (persisted): `quality`, `reduceFlashing`, `autoCycleSeconds` (0 = off), `hudVisible`, `photosensitivityNoticeSeen`, … — `hello.settings` returns the same keys |
+| `settings` | partial settings object (persisted): `quality`, `reduceFlashing`, `autoCycleSeconds` (0 = off), `hudVisible`, `photosensitivityNoticeSeen`, `transparent`, `backgroundOpacity` (0–1, default 0), `visualOpacity` (0.1–1, default 1), … — the opacities apply only while `transparent` is on; out-of-range values are ignored. `hello.settings` returns the same keys |
 | `pluginError` | `key`, `message`, `file?`, `line?`, `fatal: bool` |
 | `perf` | `key`, `fps`, `frameMsP50`, `frameMsP99`, `pluginMsP50`, `shellMs`, `renderScale`, `dropped` (1/s) |
 | `onsetSeen` | `frameIndex` — SDK saw the onset of that frame (latency measurement) |

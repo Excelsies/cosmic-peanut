@@ -8,6 +8,7 @@ app's native click does.
 """
 
 import asyncio
+import re
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -112,6 +113,45 @@ def test_parameter_changes_reach_the_host(running: RunningHost, page: Page):
     wait_for(page, lambda: running.last("params") is not None)
     key = running.host.settings.data["active"]
     assert running.host.settings.params_for(key)
+
+
+def rgba(css: str) -> tuple[float, float, float, float]:
+    """(r, g, b) in 0-255 and alpha in 0-1; WebKit gives `color-mix()` as `color(srgb ...)` in 0-1."""
+    nums = [float(n) for n in re.findall(r"-?\d*\.?\d+", css)]
+    scale = 1.0 if css.startswith("color(") else 255.0
+    r, g, b, *rest = nums
+    a = rest[0] if rest else 1.0
+    return (r * (255.0 / scale), g * (255.0 / scale), b * (255.0 / scale), a)
+
+
+def test_opacity_sliders_are_independent_gated_by_transparent_and_persist(
+    running: RunningHost, page: Page
+):
+    open_shell(running, page)
+    page.get_by_role("button", name="Settings").click()
+    layer = "getComputedStyle(document.querySelector('.viz-layer')).opacity"
+
+    def backdrop() -> tuple[float, float, float, float]:
+        return rgba(
+            page.evaluate("getComputedStyle(document.getElementById('stage')).backgroundColor")
+        )
+
+    assert backdrop() == (0, 0, 0, 0)
+    page.locator("#transparent").uncheck()
+    assert page.locator("#background-opacity").is_disabled()
+    assert page.locator("#visual-opacity").is_disabled()
+    assert backdrop() == (0, 0, 0, 1) and page.evaluate(layer) == "1"
+    page.locator("#transparent").check()
+    page.locator("#visual-opacity").focus()
+    page.keyboard.press("Home")
+    wait_for(page, lambda: running.host.settings.data["visualOpacity"] == 0.1)
+    assert page.evaluate(layer) == "0.1"
+    assert backdrop() == (0, 0, 0, 0)
+    assert running.host.settings.data["backgroundOpacity"] == 0
+    page.locator("#background-opacity").focus()
+    page.keyboard.press("End")
+    wait_for(page, lambda: running.host.settings.data["backgroundOpacity"] == 1)
+    assert backdrop() == (0, 0, 0, 1) and page.evaluate(layer) == "0.1"
 
 
 def test_hot_reload_swaps_in_the_edited_plugin(running: RunningHost, page: Page, tmp_path: Path):

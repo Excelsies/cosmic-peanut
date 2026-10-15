@@ -28,7 +28,9 @@ visuals stay flat, allow it in **System Settings → Privacy & Security → Scre
 Recording** (the app's permission button opens that page).
 
 The window is transparent, borderless and floats on top by default. Drag it by the top bar;
-change each of these under **Settings**.
+change each of these under **Settings**. **Background opacity** (default 0) and **Visual opacity**
+(default 100%, down to 10%) fade the backdrop and the visual separately. Both are inactive while
+*Transparent background* is off, which gives the solid black backdrop.
 
 | Key | Does |
 | --- | --- |

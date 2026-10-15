@@ -65,6 +65,22 @@ describe("parseHostMessage", () => {
     expect(msg.dev).toBe(true);
   });
 
+  it("keeps the opacities in range: background 0 to 1, visual 0.1 to 1", () => {
+    const parse = (/** @type {Record<string, unknown>} */ settings) => {
+      const msg = parseHostMessage(JSON.stringify({ type: "hello", version: 1, pluginOrigin: "http://127.0.0.1:2",
+        visualizers: [], repos: [], settings, sources: [], activeSource: null, active: null, dev: false }));
+      return msg?.type === "hello" ? msg.settings : "no hello";
+    };
+    expect(parse({ backgroundOpacity: 0, visualOpacity: 0.1 })).toEqual({ backgroundOpacity: 0, visualOpacity: 0.1 });
+    expect(parse({ backgroundOpacity: 1, visualOpacity: 1 })).toEqual({ backgroundOpacity: 1, visualOpacity: 1 });
+    for (const bad of [-0.1, 1.01, "0.5", null, true]) {
+      expect(parse({ backgroundOpacity: bad }), `bg ${bad}`).toEqual({});
+    }
+    for (const bad of [0, 0.09, 1.01, "0.5", null, true]) {
+      expect(parse({ visualOpacity: bad }), `visual ${bad}`).toEqual({});
+    }
+  });
+
   it("validates each param type", () => {
     const params = [
       { id: "a", type: "number", label: "A", min: 0, max: 1, step: 0.1, default: 0.5 },
