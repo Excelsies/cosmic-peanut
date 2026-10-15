@@ -6,6 +6,8 @@ The players are PipeWire's own ``pw-play`` (a native client) and ``speaker-test`
 client): the two ways an app's pid reaches PipeWire other than the PulseAudio protocol.
 """
 
+from __future__ import annotations
+
 import subprocess
 import sys
 import threading
