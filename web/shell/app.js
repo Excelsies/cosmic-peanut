@@ -9,6 +9,7 @@ import { renderLibrary } from "./library.js";
 import { renderParams, resolveValues } from "./params.js";
 import { createPluginHost, formatError } from "./pluginHost.js";
 import { qualityProfile } from "./quality.js";
+import { VISUAL_OPACITY_MIN } from "./validate.js";
 
 /**
  * @typedef {import("./validate.js").HostMessage} HostMessage
@@ -58,10 +59,18 @@ export function createApp(deps) {
   /** @type {Map<string, ParamValues>} */ const values = new Map();
   /** @type {string | null} */ let selected = null;
   /** @type {string[]} */ const history = [];
-  /** @type {Required<Pick<Settings, "quality" | "reduceFlashing" | "autoCycleSeconds" | "hudVisible" | "transparent">>} */
-  const settings = { quality: "auto", reduceFlashing: true, autoCycleSeconds: 0, hudVisible: false, transparent: false };
+  /** @type {Required<Pick<Settings, "quality" | "reduceFlashing" | "autoCycleSeconds" | "hudVisible" | "transparent" | "backgroundOpacity" | "visualOpacity">>} */
+  const settings = {
+    quality: "auto", reduceFlashing: true, autoCycleSeconds: 0, hudVisible: false, transparent: false,
+    backgroundOpacity: 0, visualOpacity: 1,
+  };
   // Transparent: no backdrop, so the desktop shows behind the (alpha) plugin canvas.
   const applyTransparent = () => root.classList.toggle("transparent", settings.transparent);
+  // Both sliders apply in transparent mode only; off, the saved values are ignored.
+  const applyOpacity = () => {
+    root.style.setProperty("--bg-alpha", String(settings.backgroundOpacity));
+    root.style.setProperty("--visual-opacity", String(settings.transparent ? settings.visualOpacity : 1));
+  };
   let dev = false;
   let overlaysHidden = false;
   /** @type {PanelName | null} */ let openPanel = null;
@@ -72,7 +81,8 @@ export function createApp(deps) {
   /** Visualizer whose error the overlay shows. @type {string | null} */ let errorKey = null;
 
   // ---- DOM -----------------------------------------------------------------------------------
-  const stage = h("div", { id: "stage", class: "stage" });
+  const vizLayer = h("div", { class: "viz-layer" });
+  const stage = h("div", { id: "stage", class: "stage" }, vizLayer);
   const empty = h("div", { class: "empty", hidden: true });
   const nowName = h("span", { class: "now-name" }, "");
   const nowRepo = h("span", { class: "now-repo" }, "");
@@ -214,7 +224,7 @@ export function createApp(deps) {
 
   // ---- plugin host ---------------------------------------------------------------------------
   const pluginHost = (deps.createPluginHost ?? createPluginHost)({
-    container: stage,
+    container: vizLayer,
     settings: { quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, dpr) },
     visible: () => doc.visibilityState !== "hidden",
     onEvent,
@@ -339,8 +349,25 @@ export function createApp(deps) {
     transparent.addEventListener("change", () => {
       settings.transparent = transparent.checked;
       applyTransparent();
+      applyOpacity();
+      backgroundOpacity.disabled = visualOpacity.disabled = !settings.transparent;
       send({ type: "settings", transparent: transparent.checked });
     });
+    // Live on input, saved on change: each settings message rewrites the file.
+    /** @param {string} id @param {number} min @param {"backgroundOpacity" | "visualOpacity"} key */
+    const opacitySlider = (id, min, key) => {
+      const input = /** @type {HTMLInputElement} */ (
+        h("input", { id, type: "range", min: String(min), max: "1", step: "0.01", value: String(settings[key]), disabled: !settings.transparent })
+      );
+      input.addEventListener("input", () => {
+        settings[key] = Math.min(1, Math.max(min, Number(input.value)));
+        applyOpacity();
+      });
+      input.addEventListener("change", () => send({ type: "settings", [key]: settings[key] }));
+      return input;
+    };
+    const backgroundOpacity = opacitySlider("background-opacity", 0, "backgroundOpacity");
+    const visualOpacity = opacitySlider("visual-opacity", VISUAL_OPACITY_MIN, "visualOpacity");
     const cycle = /** @type {HTMLSelectElement} */ (
       h("select", { id: "auto-cycle" }, AUTO_CYCLE_CHOICES.map((s) => h("option", { value: String(s) }, cycleLabel(s))))
     );
@@ -358,6 +385,8 @@ export function createApp(deps) {
       h("p", { class: "hint muted" }, "Balanced caps resolution at 1.5×; Battery at 1× and 30 fps."),
       h("div", { class: "field field-inline" }, h("label", { for: "reduce-flashing" }, "Reduce flashing"), reduce),
       h("div", { class: "field field-inline" }, h("label", { for: "transparent" }, "Transparent background"), transparent),
+      field("background-opacity", "Background opacity", backgroundOpacity),
+      field("visual-opacity", "Visual opacity", visualOpacity),
       field("auto-cycle", "Auto-cycle", cycle),
       h("h3", { class: "section-title" }, "Window"),
       h(
@@ -637,6 +666,7 @@ export function createApp(deps) {
         pluginHost.setSettings({ quality: settings.quality, reduceFlashing: settings.reduceFlashing, ...qualityProfile(settings.quality, dpr) });
         hud.setVisible(settings.hudVisible);
         applyTransparent();
+        applyOpacity();
         renderSettings();
         renderSources();
         armCycle();

@@ -49,7 +49,9 @@ button, input, select { font: inherit; color: inherit; }
 .shell { position: fixed; inset: 0; }
 
 .stage { position: absolute; inset: 0; background: var(--bg); }
-.shell.transparent .stage { background: transparent; }
+.shell.transparent .stage { background: color-mix(in srgb, var(--bg) calc(var(--bg-alpha, 0) * 100%), transparent); }
+/* The plugin iframes sit in this wrapper so --visual-opacity composes with their crossfade. */
+.viz-layer { position: absolute; inset: 0; opacity: var(--visual-opacity, 1); }
 
 .viz-frame {
   position: absolute; inset: 0; width: 100%; height: 100%;
@@ -207,6 +209,7 @@ select {
 .param-value { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.85rem; }
 .param-inline, .field-inline { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .field { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.field input[type="range"] { flex: none; width: 55%; }
 .hint { font-size: 0.75rem; margin: 0.35rem 0 0; }
 .reset { margin-top: 1rem; border-color: var(--line); width: 100%; }
 .button-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }

@@ -51,6 +51,8 @@ SHELL_SETTINGS = (
     "hudVisible",
     "photosensitivityNoticeSeen",
     "transparent",
+    "backgroundOpacity",
+    "visualOpacity",
 )
 
 

@@ -11,6 +11,7 @@ from typing import Any, cast
 from tidalviz.plugins.store import atomic_write_json
 
 QUALITY_MODES = ("auto", "high", "balanced", "battery")
+VISUAL_OPACITY_MIN = 0.1  # same floor as web/shell/validate.js
 
 DEFAULTS: dict[str, Any] = {
     "quality": "auto",
@@ -23,6 +24,8 @@ DEFAULTS: dict[str, Any] = {
     "params": {},
     "window": None,
     "transparent": True,  # show the desktop behind the visual
+    "backgroundOpacity": 0,  # backdrop alpha while transparent
+    "visualOpacity": 1.0,  # visual opacity while transparent
     "borderless": True,  # no title bar or window chrome
     "onTop": True,  # float above other apps
 }
@@ -30,6 +33,10 @@ DEFAULTS: dict[str, Any] = {
 
 def _is_bool(v: Any) -> bool:
     return isinstance(v, bool)
+
+
+def _is_fraction(low: float) -> Callable[[Any], bool]:
+    return lambda v: isinstance(v, int | float) and not isinstance(v, bool) and low <= v <= 1
 
 
 def _is_window(v: Any) -> bool:
@@ -52,6 +59,8 @@ _VALID: dict[str, Callable[[Any], bool]] = {
     "source": lambda v: isinstance(v, str) and 0 < len(v) <= 200,
     "window": _is_window,
     "transparent": _is_bool,
+    "backgroundOpacity": _is_fraction(0),
+    "visualOpacity": _is_fraction(VISUAL_OPACITY_MIN),
     "borderless": _is_bool,
     "onTop": _is_bool,
 }
