@@ -12,6 +12,7 @@ REPOS = {
     "builtin": ROOT / "plugins/builtin",
     "template": ROOT / "plugins/template",
     "cosmic-peanut": ROOT / "plugins/cosmic-peanut",
+    "fieldwork": ROOT / "plugins/fieldwork",
 }
 BUILTIN_REPOS = ("builtin", "cosmic-peanut")
 THUMB_MAX = 60 * 1024
@@ -572,3 +573,37 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_murmuration_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "murmuration"]
+    assert (v["name"], v["entry"], v["renderer"], v["libs"], v["thumbnail"]) == (
+        "Murmuration",
+        "src/murmuration.js",
+        "three",
+        ["three"],
+        "thumbs/murmuration.jpg",
+    )
+    assert v.get("description")
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["sky", "ink", "flock", "speed", "falcon", "reactivity"]
+    # Order matches lib/murmuration-params.js SKIES (shader palette index) and FLOCKS.
+    assert params["sky"]["options"] == ["dusk", "overcast", "rose", "none"]
+    assert params["sky"]["default"] == "dusk"
+    assert params["ink"] == {
+        "id": "ink",
+        "type": "color",
+        "label": "Ink (sky none)",
+        "default": "#ece6da",
+    }
+    assert params["flock"]["options"] == ["2000", "4000", "6000"]
+    assert params["flock"]["default"] == "4000"
+    speed = params["speed"]
+    assert (speed["min"], speed["max"], speed["step"]) == (0.2, 2, 0.05)
+    # lib/murmuration-params.js DEFAULT_SPEED: Reduce motion applies only while speed is at it.
+    assert speed["default"] == 1
+    assert params["falcon"]["default"] is True
+    react = params["reactivity"]
+    assert (react["min"], react["max"], react["step"], react["default"]) == (0, 2, 0.05, 1)
+    for f in ("sky.glsl", "sky.vert", "sky.frag", "bird.vert", "bird.frag"):
+        assert (REPOS["fieldwork"] / "shaders/murmuration" / f).is_file()
