@@ -646,3 +646,31 @@ def test_murmuration_manifest():
     assert (react["min"], react["max"], react["step"], react["default"]) == (0, 2, 0.05, 1)
     for f in ("sky.glsl", "sky.vert", "sky.frag", "bird.vert", "bird.frag"):
         assert (REPOS["fieldwork"] / "shaders/murmuration" / f).is_file()
+
+
+def test_plotter_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "plotter"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Plotter",
+        "src/plotter.js",
+        "2d",
+        "thumbs/plotter.jpg",
+    )
+    assert "libs" not in v
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["grid", "phrase", "paper", "inks", "weight", "chatter", "speed"]
+    # Option order matches lib/plotter-params.js (GRID_OPTIONS, PAPER_FILL, INKS, ...).
+    assert params["grid"]["options"] == ["4x3", "3x2", "6x4", "1x1"]
+    assert params["grid"]["default"] == "4x3"
+    assert params["phrase"]["options"] == ["2 bars", "4 bars", "8 bars"]
+    assert params["phrase"]["default"] == "4 bars"
+    assert params["paper"]["options"] == ["blueprint", "cream", "white", "none"]
+    assert params["paper"]["default"] == "blueprint"
+    assert params["inks"]["options"] == ["fineliner", "sepia", "mono"]
+    assert params["inks"]["default"] == "fineliner"
+    ranges = {
+        k: (params[k]["min"], params[k]["max"], params[k]["default"])
+        for k in ("weight", "chatter", "speed")
+    }
+    # lib/plotter-params.js DEFAULT_CHATTER / DEFAULT_SPEED: Reduce motion calms them at these values.
+    assert ranges == {"weight": (0.5, 3, 1), "chatter": (0, 1, 0.5), "speed": (0.25, 2, 1)}
