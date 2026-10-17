@@ -12,6 +12,7 @@ REPOS = {
     "builtin": ROOT / "plugins/builtin",
     "template": ROOT / "plugins/template",
     "cosmic-peanut": ROOT / "plugins/cosmic-peanut",
+    "fieldwork": ROOT / "plugins/fieldwork",
 }
 BUILTIN_REPOS = ("builtin", "cosmic-peanut")
 THUMB_MAX = 60 * 1024
@@ -572,3 +573,42 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_kelir_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "kelir"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Kelir",
+        "src/kelir/kelir.js",
+        "webgl2",
+        "thumbs/kelir.jpg",
+    )
+    assert "libs" not in v
+    assert v["author"] == "Fieldwork"
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["screen", "cast", "reactivity", "flicker", "blur", "lace", "scenes"]
+    # src/kelir/lib/kelir-params.js resolves these to their index: screens.js PALETTES follows
+    # the screen order, stage.js the cast order (CAST_SOLO = 1, CAST_KAYON = 2).
+    assert params["screen"]["options"] == ["lamp", "moon", "reiniger", "none"]
+    assert params["screen"]["default"] == "lamp"
+    assert params["cast"]["options"] == ["duet", "solo", "kayon"]
+    # kelir-params.js DEFAULT_CAST.
+    assert params["cast"]["default"] == "duet"
+    # kelir-params.js DEFAULT_REACTIVITY / DEFAULT_FLICKER: reduce motion calms the motion and
+    # the flicker only while each is at this default.
+    for pid, lo, hi, default in (
+        ("reactivity", 0, 2, 1),
+        ("flicker", 0, 1, 0.5),
+        ("blur", 0, 1.5, 1),
+        ("lace", 0.5, 2, 1),
+    ):
+        p = params[pid]
+        assert (p["min"], p["max"], p["default"], p["step"]) == (lo, hi, default, 0.05), pid
+    assert params["scenes"] == {
+        "id": "scenes",
+        "type": "boolean",
+        "label": "Scenes",
+        "default": True,
+    }
+    for f in ("fullscreen.vert", "mask.vert", "mask.frag", "sdf.glsl", "composite.frag"):
+        assert (REPOS["fieldwork"] / "shaders/kelir" / f).is_file(), f
