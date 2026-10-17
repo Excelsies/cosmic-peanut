@@ -103,22 +103,6 @@ Known gap: no live per-process CPU/GPU measurement of the merged app yet; everyt
 tests, emulation and llvmpipe renders, not the RTX 4090 or macOS. Soft lines with antialias at
 DPR 1 (Cosmic Peanut) is still ~44.7 MB, over the PRD's 10 MB.
 
-## Background and visual opacity (2026-10-02)
-
-Two persisted settings, `backgroundOpacity` (0–1, default 0) and `visualOpacity` (0.1–1, default
-1), live only while *Transparent background* is on.
-
-- **Two sliders, and the visual's goes on a `.viz-layer` wrapper.** *Transparent background* only
-  removes the black backdrop, but most visualizers paint nearly every pixel, so the window stays
-  opaque. The backdrop alpha sits on the stage background. The visual opacity sits on a new
-  `.viz-layer` around the plugin iframes, not on `.stage` (that would fade the backdrop too) and not
-  on each iframe (the plugin host animates their inline `opacity` for the crossfade).
-- **Fade live on `input`, save on `change`.** Each `settings` message rewrites settings.json.
-- Visual stops at 0.1 so the visual can fade but never vanish; Background has no floor.
-
-Known gap: not run on macOS, and the GPU cost of the extra compositing layer below opacity 1 is
-unmeasured.
-
 ## Linux support (2026-10-02)
 
 **Machine (not the M4 Pro above):** Linux 7.2 (CachyOS), i9-12900KF, RTX 4090 (driver 615.71),
@@ -162,6 +146,22 @@ before the first block, for a sink waking from suspend); silent audio still stre
   memory (Orbit 51.6 fps, WebKitWebProcess at 94.5% CPU, against 59.5 fps and 10.3% CPU with DMA-BUF
   kept); a Qt backend (WebEngine is Chromium, 524 MB); PyGObject as a default dependency (a bare
   `uv sync` would fail without headers), hence the `gtk` extra.
+
+## Background and visual opacity (2026-10-02)
+
+Two persisted settings, `backgroundOpacity` (0–1, default 0) and `visualOpacity` (0.1–1, default
+1), live only while *Transparent background* is on.
+
+- **Two sliders, and the visual's goes on a `.viz-layer` wrapper.** *Transparent background* only
+  removes the black backdrop, but most visualizers paint nearly every pixel, so the window stays
+  opaque. The backdrop alpha sits on the stage background. The visual opacity sits on a new
+  `.viz-layer` around the plugin iframes, not on `.stage` (that would fade the backdrop too) and not
+  on each iframe (the plugin host animates their inline `opacity` for the crossfade).
+- **Fade live on `input`, save on `change`.** Each `settings` message rewrites settings.json.
+- Visual stops at 0.1 so the visual can fade but never vanish; Background has no floor.
+
+Known gap: not run on macOS, and the GPU cost of the extra compositing layer below opacity 1 is
+unmeasured.
 
 ## Visualizer batch: Tentacube, Tie-Dye, Skull Trip, Dark Sun, Eclipse, Marbling, Laminar, Tetraballs (2026-09-28)
 
