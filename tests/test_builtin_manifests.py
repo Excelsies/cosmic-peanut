@@ -66,7 +66,7 @@ def test_webgl2_visualizers_drop_the_unused_canvas_depth_buffer():
         "builtin": 12,
         "template": 1,
         "cosmic-peanut": 1,
-        "fieldwork": 3,
+        "fieldwork": 4,
     }
     assert [v["id"] for _, v in webgl2 if v.get("depth", True)] == KEEP_CANVAS_DEPTH
 
@@ -603,6 +603,7 @@ def test_fieldwork_lists_its_visualizers_in_order():
         "soapfilm",
         "miura",
         "isobar",
+        "kelir",
     ]
     for v in m["visualizers"]:
         assert v["author"] == "Fieldwork" and v.get("description") and v.get("thumbnail"), v["id"]
@@ -852,3 +853,42 @@ def test_isobar_manifest():
         assert (p["min"], p["max"], p["default"], p["step"]) == (lo, hi, default, 0.05), pid
     for pid in ("fronts", "barbs", "labels", "coastline", "tints"):
         assert (params[pid]["type"], params[pid]["default"]) == ("boolean", True), pid
+
+
+def test_kelir_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "kelir"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Kelir",
+        "src/kelir/kelir.js",
+        "webgl2",
+        "thumbs/kelir.jpg",
+    )
+    assert "libs" not in v
+    assert v["author"] == "Fieldwork"
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["screen", "cast", "reactivity", "flicker", "blur", "lace", "scenes"]
+    # src/kelir/lib/kelir-params.js resolves these to their index: screens.js PALETTES follows
+    # the screen order, stage.js the cast order (CAST_SOLO = 1, CAST_KAYON = 2).
+    assert params["screen"]["options"] == ["lamp", "moon", "reiniger", "none"]
+    assert params["screen"]["default"] == "lamp"
+    assert params["cast"]["options"] == ["duet", "solo", "kayon"]
+    # kelir-params.js DEFAULT_CAST.
+    assert params["cast"]["default"] == "duet"
+    # kelir-params.js DEFAULT_REACTIVITY / DEFAULT_FLICKER: reduce motion calms the motion and
+    # the flicker only while each is at this default.
+    for pid, lo, hi, default in (
+        ("reactivity", 0, 2, 1),
+        ("flicker", 0, 1, 0.5),
+        ("blur", 0, 1.5, 1),
+        ("lace", 0.5, 2, 1),
+    ):
+        p = params[pid]
+        assert (p["min"], p["max"], p["default"], p["step"]) == (lo, hi, default, 0.05), pid
+    assert params["scenes"] == {
+        "id": "scenes",
+        "type": "boolean",
+        "label": "Scenes",
+        "default": True,
+    }
+    for f in ("fullscreen.vert", "mask.vert", "mask.frag", "sdf.glsl", "composite.frag"):
+        assert (REPOS["fieldwork"] / "shaders/kelir" / f).is_file(), f
