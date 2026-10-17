@@ -577,7 +577,12 @@ def test_tetraballs_manifest():
 
 def test_fieldwork_lists_its_visualizers_in_order():
     m = _manifest("fieldwork")
-    assert [v["id"] for v in m["visualizers"]] == ["chladni", "murmuration", "plotter", "misregister"]
+    assert [v["id"] for v in m["visualizers"]] == [
+        "chladni",
+        "murmuration",
+        "plotter",
+        "misregister",
+    ]
     for v in m["visualizers"]:
         assert v["author"] == "Fieldwork" and v.get("description") and v.get("thumbnail"), v["id"]
 
