@@ -12,6 +12,7 @@ REPOS = {
     "builtin": ROOT / "plugins/builtin",
     "template": ROOT / "plugins/template",
     "cosmic-peanut": ROOT / "plugins/cosmic-peanut",
+    "fieldwork": ROOT / "plugins/fieldwork",
 }
 BUILTIN_REPOS = ("builtin", "cosmic-peanut")
 THUMB_MAX = 60 * 1024
@@ -572,3 +573,42 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_chladni_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "chladni"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Chladni",
+        "src/chladni.js",
+        "webgl2",
+        "thumbs/chladni.jpg",
+    )
+    assert "libs" not in v
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["palette", "backdrop", "grains", "complexity", "reactivity", "hop"]
+    # lib/chladni-params.js indexes these options in this order (composite.frag's palettes too).
+    assert params["palette"]["options"] == ["brass", "slate", "cobalt", "mono"]
+    assert params["palette"]["default"] == "brass"
+    assert params["backdrop"]["options"] == ["plate", "none"]
+    assert params["backdrop"]["default"] == "plate"
+    # Battery quality swaps 64k for 32k only while Grains is at this default.
+    assert params["grains"]["options"] == ["32k", "64k", "128k"]
+    assert params["grains"]["default"] == "64k"
+    # lib/chladni-params.js DEFAULT_REACTIVITY: Reduce motion calms the plate only at this default.
+    assert params["reactivity"]["default"] == 1
+    for pid, lo, hi, default in (
+        ("complexity", 0.5, 2, 1),
+        ("reactivity", 0, 2, 1),
+        ("hop", 0, 2, 1),
+    ):
+        p = params[pid]
+        assert (p["min"], p["max"], p["default"], p["step"]) == (lo, hi, default, 0.05), pid
+    for f in (
+        "update.vert",
+        "update.frag",
+        "deposit.vert",
+        "deposit.frag",
+        "fullscreen.vert",
+        "composite.frag",
+    ):
+        assert (REPOS["fieldwork"] / "shaders/chladni" / f).is_file()
