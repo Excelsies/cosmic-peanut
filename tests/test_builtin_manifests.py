@@ -12,6 +12,7 @@ REPOS = {
     "builtin": ROOT / "plugins/builtin",
     "template": ROOT / "plugins/template",
     "cosmic-peanut": ROOT / "plugins/cosmic-peanut",
+    "fieldwork": ROOT / "plugins/fieldwork",
 }
 BUILTIN_REPOS = ("builtin", "cosmic-peanut")
 THUMB_MAX = 60 * 1024
@@ -572,3 +573,35 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_isobar_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "isobar"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Isobar",
+        "src/isobar.js",
+        "2d",
+        "thumbs/isobar.jpg",
+    )
+    assert "libs" not in v
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "chart",
+        "reactivity",
+        "speed",
+        "fronts",
+        "barbs",
+        "labels",
+        "coastline",
+        "tints",
+    ]
+    # src/isobar/isobar-params.js CHARTS and chart.js CHART_STYLES are in this order.
+    assert params["chart"]["options"] == ["paper", "broadcast", "night", "none"]
+    assert params["chart"]["default"] == "paper"
+    # isobar-params.js DEFAULT_SPEED: Reduce motion calms drift, kicks and the front sweep only
+    # while Speed is at this default.
+    for pid, lo, hi, default in (("reactivity", 0, 2, 1), ("speed", 0.2, 2, 1)):
+        p = params[pid]
+        assert (p["min"], p["max"], p["default"], p["step"]) == (lo, hi, default, 0.05), pid
+    for pid in ("fronts", "barbs", "labels", "coastline", "tints"):
+        assert (params[pid]["type"], params[pid]["default"]) == ("boolean", True), pid
