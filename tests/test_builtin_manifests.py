@@ -1,6 +1,7 @@
 """The built-in visualizers and the template repo ship valid, complete manifests."""
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import jsonschema
@@ -61,7 +62,12 @@ KEEP_CANVAS_DEPTH = ["undertow", "blaze", "cascade", "tiedye", "skull", "laminar
 def test_webgl2_visualizers_drop_the_unused_canvas_depth_buffer():
     """None of them enables DEPTH_TEST on the default framebuffer."""
     webgl2 = [(repo, v) for repo, v in _entries() if v["renderer"] == "webgl2"]
-    assert len(webgl2) == 14
+    assert Counter(repo for repo, _ in webgl2) == {
+        "builtin": 12,
+        "template": 1,
+        "cosmic-peanut": 1,
+        "fieldwork": 2,
+    }
     assert [v["id"] for _, v in webgl2 if v.get("depth", True)] == KEEP_CANVAS_DEPTH
 
 
