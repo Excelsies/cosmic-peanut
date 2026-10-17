@@ -12,6 +12,7 @@ REPOS = {
     "builtin": ROOT / "plugins/builtin",
     "template": ROOT / "plugins/template",
     "cosmic-peanut": ROOT / "plugins/cosmic-peanut",
+    "fieldwork": ROOT / "plugins/fieldwork",
 }
 BUILTIN_REPOS = ("builtin", "cosmic-peanut")
 THUMB_MAX = 60 * 1024
@@ -572,3 +573,44 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_soapfilm_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "soapfilm"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Soapfilm",
+        "src/soapfilm.js",
+        "webgl2",
+        "thumbs/soapfilm.jpg",
+    )
+    assert "libs" not in v
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "backdrop",
+        "light",
+        "thickness",
+        "swirl",
+        "drainage",
+        "redip",
+        "reactivity",
+    ]
+    # src/soapfilm/soapfilm-params.js indexes these options in this order: composite.frag's
+    # u_backdrop, thinfilm.js LIGHT_KELVIN and redip.js's bar counts.
+    assert params["backdrop"]["options"] == ["velvet", "studio", "none"]
+    assert params["backdrop"]["default"] == "velvet"
+    assert params["light"]["options"] == ["softbox", "sky", "warm"]
+    assert params["light"]["default"] == "softbox"
+    assert params["redip"]["options"] == ["16 bars", "32 bars", "when black"]
+    assert params["redip"]["default"] == "16 bars"
+    # soapfilm-params.js DEFAULT_SWIRL / DEFAULT_DRAINAGE / DEFAULT_REACTIVITY: Reduce motion
+    # calms each of these only while it is at this default.
+    for pid, lo, hi, default in (
+        ("thickness", 0.5, 2, 1),
+        ("swirl", 0, 2, 1),
+        ("drainage", 0.2, 3, 1),
+        ("reactivity", 0, 2, 1),
+    ):
+        p = params[pid]
+        assert (p["min"], p["max"], p["default"], p["step"]) == (lo, hi, default, 0.05), pid
+    for f in ("fullscreen.vert", "state.frag", "composite.frag"):
+        assert (REPOS["fieldwork"] / "shaders/soapfilm" / f).is_file()
