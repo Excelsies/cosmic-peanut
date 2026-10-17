@@ -56,7 +56,9 @@ def test_builtin_renderers():
 
 # Mesa llvmpipe shades these final passes 1 LSB differently when the target has no depth buffer
 # (depth test off either way), so they keep it until that is shown to be llvmpipe-only.
-KEEP_CANVAS_DEPTH = ["undertow", "blaze", "cascade", "tiedye", "skull", "laminar"]
+# Fieldwork accepts that 1-LSB shift (Chladni, Kelir); Soapfilm keeps the buffer because without
+# it the antialiased black-film edge moves by up to 14 levels on 0.06-0.17% of pixels.
+KEEP_CANVAS_DEPTH = ["undertow", "blaze", "cascade", "tiedye", "skull", "laminar", "soapfilm"]
 
 
 def test_webgl2_visualizers_drop_the_unused_canvas_depth_buffer():
