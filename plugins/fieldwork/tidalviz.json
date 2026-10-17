@@ -1,0 +1,76 @@
+{
+  "apiVersion": 1,
+  "visualizers": [
+    {
+      "id": "chladni",
+      "name": "Chladni",
+      "description": "Sand on a ringing brass plate gathers into the standing-wave figure of each note, hops on kicks and fizzes on hats.",
+      "author": "Fieldwork",
+      "entry": "src/chladni.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/chladni.jpg",
+      "params": [
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["brass", "slate", "cobalt", "mono"], "default": "brass" },
+        { "id": "backdrop", "type": "select", "label": "Backdrop", "options": ["plate", "none"], "default": "plate" },
+        { "id": "grains", "type": "select", "label": "Grains", "options": ["32k", "64k", "128k"], "default": "64k" },
+        { "id": "complexity", "type": "number", "label": "Complexity", "min": 0.5, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "hop", "type": "number", "label": "Hop", "min": 0, "max": 2, "step": 0.05, "default": 1 }
+      ]
+    },
+    {
+      "id": "murmuration",
+      "name": "Murmuration",
+      "description": "Thousands of starlings wheel as one silhouette over a dusk sky: kicks squeeze the flock dark, strong hits send a falcon diving through.",
+      "author": "Fieldwork",
+      "entry": "src/murmuration.js",
+      "renderer": "three",
+      "libs": ["three"],
+      "thumbnail": "thumbs/murmuration.jpg",
+      "params": [
+        { "id": "sky", "type": "select", "label": "Sky", "options": ["dusk", "overcast", "rose", "none"], "default": "dusk" },
+        { "id": "ink", "type": "color", "label": "Ink (sky none)", "default": "#ece6da" },
+        { "id": "flock", "type": "select", "label": "Flock size", "options": ["2000", "4000", "6000"], "default": "4000" },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0.2, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "falcon", "type": "boolean", "label": "Falcon", "default": true },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 }
+      ]
+    },
+    {
+      "id": "plotter",
+      "name": "Plotter",
+      "description": "A pen plotter traces one decaying harmonograph per phrase on a sheet of blueprint paper: the harmony sets the figure, hits kink the line, loudness presses the pen.",
+      "author": "Fieldwork",
+      "entry": "src/plotter.js",
+      "renderer": "2d",
+      "thumbnail": "thumbs/plotter.jpg",
+      "params": [
+        { "id": "grid", "type": "select", "label": "Grid", "options": ["4x3", "3x2", "6x4", "1x1"], "default": "4x3" },
+        { "id": "phrase", "type": "select", "label": "Phrase", "options": ["2 bars", "4 bars", "8 bars"], "default": "4 bars" },
+        { "id": "paper", "type": "select", "label": "Paper", "options": ["blueprint", "cream", "white", "none"], "default": "blueprint" },
+        { "id": "inks", "type": "select", "label": "Inks", "options": ["fineliner", "sepia", "mono"], "default": "fineliner" },
+        { "id": "weight", "type": "number", "label": "Line weight", "min": 0.5, "max": 3, "step": 0.05, "default": 1 },
+        { "id": "chatter", "type": "number", "label": "Pen chatter", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0.25, "max": 2, "step": 0.05, "default": 1 }
+      ]
+    },
+    {
+      "id": "misregister",
+      "name": "Misregister",
+      "description": "A risograph poster on a Swiss grid: each pitch class owns a flat shape printed as a three-colour halftone. Chords swell their shapes, kicks knock the plates out of register, and every few bars the layout slides to a new composition.",
+      "author": "Fieldwork",
+      "entry": "src/misregister.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/misregister.jpg",
+      "params": [
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["riso", "bauhaus", "sunset", "mono"], "default": "riso" },
+        { "id": "paper", "type": "select", "label": "Paper", "options": ["cream", "white", "kraft", "none"], "default": "cream" },
+        { "id": "screen", "type": "number", "label": "Screen ruling", "min": 30, "max": 160, "step": 1, "default": 90 },
+        { "id": "misregister", "type": "number", "label": "Misregister", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "grain", "type": "number", "label": "Grain", "min": 0, "max": 1, "step": 0.01, "default": 0.4 },
+        { "id": "relayout", "type": "select", "label": "Re-layout", "options": ["8 bars", "16 bars", "32 bars", "never"], "default": "8 bars" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 }
+      ]
+    }
+  ]
+}

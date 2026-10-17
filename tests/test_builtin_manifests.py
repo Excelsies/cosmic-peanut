@@ -12,6 +12,7 @@ REPOS = {
     "builtin": ROOT / "plugins/builtin",
     "template": ROOT / "plugins/template",
     "cosmic-peanut": ROOT / "plugins/cosmic-peanut",
+    "fieldwork": ROOT / "plugins/fieldwork",
 }
 BUILTIN_REPOS = ("builtin", "cosmic-peanut")
 THUMB_MAX = 60 * 1024
@@ -584,3 +585,158 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_fieldwork_lists_its_visualizers_in_order():
+    m = _manifest("fieldwork")
+    assert [v["id"] for v in m["visualizers"]] == [
+        "chladni",
+        "murmuration",
+        "plotter",
+        "misregister",
+    ]
+    for v in m["visualizers"]:
+        assert v["author"] == "Fieldwork" and v.get("description") and v.get("thumbnail"), v["id"]
+
+
+def test_chladni_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "chladni"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Chladni",
+        "src/chladni.js",
+        "webgl2",
+        "thumbs/chladni.jpg",
+    )
+    assert "libs" not in v
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["palette", "backdrop", "grains", "complexity", "reactivity", "hop"]
+    # lib/chladni-params.js indexes these options in this order (composite.frag's palettes too).
+    assert params["palette"]["options"] == ["brass", "slate", "cobalt", "mono"]
+    assert params["palette"]["default"] == "brass"
+    assert params["backdrop"]["options"] == ["plate", "none"]
+    assert params["backdrop"]["default"] == "plate"
+    # Battery quality swaps 64k for 32k only while Grains is at this default.
+    assert params["grains"]["options"] == ["32k", "64k", "128k"]
+    assert params["grains"]["default"] == "64k"
+    # lib/chladni-params.js DEFAULT_REACTIVITY: Reduce motion calms the plate only at this default.
+    assert params["reactivity"]["default"] == 1
+    for pid, lo, hi, default in (
+        ("complexity", 0.5, 2, 1),
+        ("reactivity", 0, 2, 1),
+        ("hop", 0, 2, 1),
+    ):
+        p = params[pid]
+        assert (p["min"], p["max"], p["default"], p["step"]) == (lo, hi, default, 0.05), pid
+    for f in (
+        "update.vert",
+        "update.frag",
+        "deposit.vert",
+        "deposit.frag",
+        "fullscreen.vert",
+        "composite.frag",
+    ):
+        assert (REPOS["fieldwork"] / "shaders/chladni" / f).is_file()
+
+
+def test_murmuration_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "murmuration"]
+    assert (v["name"], v["entry"], v["renderer"], v["libs"], v["thumbnail"]) == (
+        "Murmuration",
+        "src/murmuration.js",
+        "three",
+        ["three"],
+        "thumbs/murmuration.jpg",
+    )
+    assert v.get("description")
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["sky", "ink", "flock", "speed", "falcon", "reactivity"]
+    # Order matches lib/murmuration-params.js SKIES (shader palette index) and FLOCKS.
+    assert params["sky"]["options"] == ["dusk", "overcast", "rose", "none"]
+    assert params["sky"]["default"] == "dusk"
+    assert params["ink"] == {
+        "id": "ink",
+        "type": "color",
+        "label": "Ink (sky none)",
+        "default": "#ece6da",
+    }
+    assert params["flock"]["options"] == ["2000", "4000", "6000"]
+    assert params["flock"]["default"] == "4000"
+    speed = params["speed"]
+    assert (speed["min"], speed["max"], speed["step"]) == (0.2, 2, 0.05)
+    # lib/murmuration-params.js DEFAULT_SPEED: Reduce motion applies only while speed is at it.
+    assert speed["default"] == 1
+    assert params["falcon"]["default"] is True
+    react = params["reactivity"]
+    assert (react["min"], react["max"], react["step"], react["default"]) == (0, 2, 0.05, 1)
+    for f in ("sky.glsl", "sky.vert", "sky.frag", "bird.vert", "bird.frag"):
+        assert (REPOS["fieldwork"] / "shaders/murmuration" / f).is_file()
+
+
+def test_plotter_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "plotter"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Plotter",
+        "src/plotter.js",
+        "2d",
+        "thumbs/plotter.jpg",
+    )
+    assert "libs" not in v
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["grid", "phrase", "paper", "inks", "weight", "chatter", "speed"]
+    # Option order matches lib/plotter-params.js (GRID_OPTIONS, PAPER_FILL, INKS, ...).
+    assert params["grid"]["options"] == ["4x3", "3x2", "6x4", "1x1"]
+    assert params["grid"]["default"] == "4x3"
+    assert params["phrase"]["options"] == ["2 bars", "4 bars", "8 bars"]
+    assert params["phrase"]["default"] == "4 bars"
+    assert params["paper"]["options"] == ["blueprint", "cream", "white", "none"]
+    assert params["paper"]["default"] == "blueprint"
+    assert params["inks"]["options"] == ["fineliner", "sepia", "mono"]
+    assert params["inks"]["default"] == "fineliner"
+    ranges = {
+        k: (params[k]["min"], params[k]["max"], params[k]["default"])
+        for k in ("weight", "chatter", "speed")
+    }
+    # lib/plotter-params.js DEFAULT_CHATTER / DEFAULT_SPEED: Reduce motion calms them at these values.
+    assert ranges == {"weight": (0.5, 3, 1), "chatter": (0, 1, 0.5), "speed": (0.25, 2, 1)}
+
+
+def test_misregister_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "misregister"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Misregister",
+        "src/misregister.js",
+        "webgl2",
+        "thumbs/misregister.jpg",
+    )
+    assert "libs" not in v
+    assert v.get("description")
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "palette",
+        "paper",
+        "screen",
+        "misregister",
+        "grain",
+        "relayout",
+        "reactivity",
+    ]
+    # Option order = index order in src/lib/misregister-params.js (PALETTES, PAPERS, RELAYOUT_BARS).
+    assert params["palette"]["options"] == ["riso", "bauhaus", "sunset", "mono"]
+    assert params["palette"]["default"] == "riso"
+    assert params["paper"]["options"] == ["cream", "white", "kraft", "none"]
+    assert params["paper"]["default"] == "cream"
+    assert params["relayout"]["options"] == ["8 bars", "16 bars", "32 bars", "never"]
+    # DEFAULT_RELAYOUT and DEFAULTS.misregister: Reduce motion calms them only at these values.
+    assert params["relayout"]["default"] == "8 bars"
+    got = {
+        k: tuple(params[k].get(f) for f in ("type", "min", "max", "step", "default"))
+        for k in ("screen", "misregister", "grain", "reactivity")
+    }
+    assert got == {
+        "screen": ("number", 30, 160, 1, 90),
+        "misregister": ("number", 0, 1, 0.01, 0.5),
+        "grain": ("number", 0, 1, 0.01, 0.4),
+        "reactivity": ("number", 0, 2, 0.05, 1),
+    }
+    for f in ("fullscreen.vert", "plates.frag", "halftone.frag"):
+        assert (REPOS["fieldwork"] / "shaders/misregister" / f).is_file(), f
