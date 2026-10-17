@@ -3,6 +3,42 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Blaze: flame-test materials and sparks (2026-10-15)
+
+Eleven new palettes after the original four: propane, copper, boron, sodium, lithium, strontium,
+potassium, calcium, barium (flame-test colours) and iron, nickel (sparks).
+
+- **Blackbody rendering:** a material is `soot` × the blackbody glow plus `line` × `strength` × t^1.2
+  (its emission lines/bands, filling the body more evenly than the soot), tone-mapped together.
+  Propane is nearly soot-free, hence blue. Display gamma flattens colour ratios hard, so strontium
+  and calcium need almost no green in their lines to read as red and brick orange.
+  **Simple rendering:** a keyed ramp through a hand-picked `swatch`.
+- **Iron and nickel barely tint a flame** (they burn like "natural"); they throw sparks:
+  `lib/sparks.js`, a 1,024-slot structure-of-arrays pool (swap-remove, no per-frame allocation)
+  spawned from the fuel line by rejection sampling on fuel, so sparks fly from the loud columns,
+  at a rate set by the bass stoke and onset flare. Gravity + drag arcs; colour is blackbody cooling
+  over life. Iron sparks fork into 3–5 short, hotter children (steel's carbon burst); nickel's are
+  mixed 70% toward white and never fork. Drawn as soft additive streaks (35 ms of motion) after the
+  composite. Spark motion runs on sim time, so Speed and reduce-motion slow it.
+- Known gap: the spark pass's GPU cost isn't measured (worst case 1,024 streaks, a 172 KB
+  `bufferSubData` per frame).
+
+## Blaze: blackbody rendering (2026-10-15)
+
+A new *Rendering* param: **blackbody** (default) or **simple** (the original hand-keyed ramps,
+byte-identical stills).
+
+- **Blackbody is Tetraballs' fire model, not a new one.** Heat t → K = 800 + 2400 · t^1.4, Planck's
+  law at 610/550/465 nm, emission ∝ t^2.2, ACES tone map + display gamma. A test reads
+  `shaders/tetraballs/volume.glsl` so the two can't drift. (Tetraballs' SIGGRAPH citations are its
+  thin-film and sheen materials; the fire is plain Planck.)
+- **Still a 256-texel LUT built on the CPU**, rebuilt on palette/rendering change: the GPU path and
+  its cost are unchanged. `gain` (2) stands in for the density Tetraballs' ray march accumulates.
+- **Palettes are re-tints of the blackbody fire:** blue gas and green chemical swap channels; ember
+  mono is a deep-red → orange curve on luminance (the brightest channel saturates early and looked flat).
+- The low-heat tips are less red than the old ramp (r/g ≈ 3.8 at t = 0.2, against 14): that is a
+  ~1050 K blackbody after display gamma, so the red-tips test now asks r > 3.5 g.
+
 ## Performance pass (2026-10-11)
 
 Fork only. Fewer machine resources at the same picture: each change is pixel-identical in the
@@ -119,22 +155,6 @@ Known gap: no live per-process CPU/GPU measurement of the merged app yet; everyt
 tests, emulation and llvmpipe renders, not the RTX 4090 or macOS. Soft lines with antialias at
 DPR 1 (Cosmic Peanut) is still ~44.7 MB, over the PRD's 10 MB.
 
-## Background and visual opacity (2026-10-02)
-
-Two persisted settings, `backgroundOpacity` (0–1, default 0) and `visualOpacity` (0.1–1, default
-1), live only while *Transparent background* is on.
-
-- **Two sliders, and the visual's goes on a `.viz-layer` wrapper.** *Transparent background* only
-  removes the black backdrop, but most visualizers paint nearly every pixel, so the window stays
-  opaque. The backdrop alpha sits on the stage background. The visual opacity sits on a new
-  `.viz-layer` around the plugin iframes, not on `.stage` (that would fade the backdrop too) and not
-  on each iframe (the plugin host animates their inline `opacity` for the crossfade).
-- **Fade live on `input`, save on `change`.** Each `settings` message rewrites settings.json.
-- Visual stops at 0.1 so the visual can fade but never vanish; Background has no floor.
-
-Known gap: not run on macOS, and the GPU cost of the extra compositing layer below opacity 1 is
-unmeasured.
-
 ## Linux support (2026-10-02)
 
 **Machine (not the M4 Pro above):** Linux 7.2 (CachyOS), i9-12900KF, RTX 4090 (driver 615.71),
@@ -178,6 +198,22 @@ before the first block, for a sink waking from suspend); silent audio still stre
   memory (Orbit 51.6 fps, WebKitWebProcess at 94.5% CPU, against 59.5 fps and 10.3% CPU with DMA-BUF
   kept); a Qt backend (WebEngine is Chromium, 524 MB); PyGObject as a default dependency (a bare
   `uv sync` would fail without headers), hence the `gtk` extra.
+
+## Background and visual opacity (2026-10-02)
+
+Two persisted settings, `backgroundOpacity` (0–1, default 0) and `visualOpacity` (0.1–1, default
+1), live only while *Transparent background* is on.
+
+- **Two sliders, and the visual's goes on a `.viz-layer` wrapper.** *Transparent background* only
+  removes the black backdrop, but most visualizers paint nearly every pixel, so the window stays
+  opaque. The backdrop alpha sits on the stage background. The visual opacity sits on a new
+  `.viz-layer` around the plugin iframes, not on `.stage` (that would fade the backdrop too) and not
+  on each iframe (the plugin host animates their inline `opacity` for the crossfade).
+- **Fade live on `input`, save on `change`.** Each `settings` message rewrites settings.json.
+- Visual stops at 0.1 so the visual can fade but never vanish; Background has no floor.
+
+Unit and e2e tests pass on macOS (2026-10-14). Known gap: the GPU cost of the extra compositing
+layer below opacity 1 is unmeasured.
 
 ## Visualizer batch: Tentacube, Tie-Dye, Skull Trip, Dark Sun, Eclipse, Marbling, Laminar, Tetraballs (2026-09-28)
 
