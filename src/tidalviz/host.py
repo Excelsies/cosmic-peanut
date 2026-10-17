@@ -83,7 +83,9 @@ def make_source(source_id: str, apps: Sequence[AudioApp] | None = None) -> Audio
         return system_source()
     if source_id.startswith("app:"):
         pid = int(source_id.removeprefix("app:"))
-        app = next(a for a in (list_audio_apps() if apps is None else apps) if a.pid == pid)
+        app = next((a for a in (list_audio_apps() if apps is None else apps) if a.pid == pid), None)
+        if app is None:
+            raise ValueError(f"app {pid} is not playing audio")
         return app_source(app)
     if source_id.startswith("synthetic:"):
         return SyntheticSource(source_id.removeprefix("synthetic:"))
@@ -175,9 +177,10 @@ class Host:
         source_id = self.settings.data["source"]
         try:
             return make_source(source_id)
-        except (ValueError, StopIteration):
-            log.warning("audio source %s is unavailable; using system audio", source_id)
-        self.settings.data["source"] = "system"
+        except ValueError as e:
+            # A saved `app:<pid>` is usually gone after a restart; don't refuse to launch.
+            log.warning("saved source unavailable (%s); using system audio", e)
+        self.settings.data["source"] = "system"  # this launch only, like --source
         self._notices.append(
             {
                 "type": "status",
@@ -414,7 +417,7 @@ class Host:
             return
         try:
             source = make_source(source_id, apps)
-        except (ValueError, StopIteration):
+        except ValueError:
             await self.servers.control.broadcast_json(
                 {"type": "status", "level": "error", "text": f"Unknown audio source: {source_id}"}
             )
