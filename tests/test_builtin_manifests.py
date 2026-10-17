@@ -12,6 +12,7 @@ REPOS = {
     "builtin": ROOT / "plugins/builtin",
     "template": ROOT / "plugins/template",
     "cosmic-peanut": ROOT / "plugins/cosmic-peanut",
+    "fieldwork": ROOT / "plugins/fieldwork",
 }
 BUILTIN_REPOS = ("builtin", "cosmic-peanut")
 THUMB_MAX = 60 * 1024
@@ -572,3 +573,33 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_miura_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "miura"]
+    assert (v["name"], v["entry"], v["renderer"], v["libs"], v["thumbnail"]) == (
+        "Miura",
+        "src/miura/miura.js",
+        "three",
+        ["three"],
+        "thumbs/miura.jpg",
+    )
+    assert v["author"] == "Fieldwork" and v["description"]
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["paper", "pleat", "sheet", "fold", "reactivity", "light", "shadows"]
+    # Option orders match PAPERS/PLEATS/SHEETS/LIGHTS in src/miura/lib/miura-params.js.
+    assert params["paper"]["options"] == ["washi", "indigo", "vermilion", "foil", "graphite"]
+    assert params["pleat"]["options"] == ["classic", "fine", "bold"]
+    assert params["sheet"]["options"] == ["fill", "float"]
+    assert params["light"]["options"] == ["window", "noon", "low-sun"]
+    assert (params["paper"]["default"], params["pleat"]["default"], params["sheet"]["default"]) == (
+        "washi",
+        "classic",
+        "fill",
+    )
+    assert params["light"]["default"] == "window"
+    assert params["shadows"]["default"] is True
+    # Reduce motion keys off DEFAULT_FOLD and DEFAULT_REACTIVITY (lib/miura-params.js).
+    fold, react = params["fold"], params["reactivity"]
+    assert (fold["min"], fold["max"], fold["step"], fold["default"]) == (0.2, 1.5, 0.05, 1)
+    assert (react["min"], react["max"], react["step"], react["default"]) == (0, 2, 0.05, 1)
