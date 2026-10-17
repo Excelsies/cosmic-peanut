@@ -12,6 +12,7 @@ REPOS = {
     "builtin": ROOT / "plugins/builtin",
     "template": ROOT / "plugins/template",
     "cosmic-peanut": ROOT / "plugins/cosmic-peanut",
+    "fieldwork": ROOT / "plugins/fieldwork",
 }
 BUILTIN_REPOS = ("builtin", "cosmic-peanut")
 THUMB_MAX = 60 * 1024
@@ -572,3 +573,45 @@ def test_tetraballs_manifest():
     assert params["bounce"]["default"] == 1
     for name in ("common.glsl", "materials.glsl", "surface.glsl", "volume.glsl", "composite.frag"):
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
+
+
+def test_misregister_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "misregister"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Misregister",
+        "src/misregister.js",
+        "webgl2",
+        "thumbs/misregister.jpg",
+    )
+    assert "libs" not in v
+    assert v.get("description")
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "palette",
+        "paper",
+        "screen",
+        "misregister",
+        "grain",
+        "relayout",
+        "reactivity",
+    ]
+    # Option order = index order in src/lib/misregister-params.js (PALETTES, PAPERS, RELAYOUT_BARS).
+    assert params["palette"]["options"] == ["riso", "bauhaus", "sunset", "mono"]
+    assert params["palette"]["default"] == "riso"
+    assert params["paper"]["options"] == ["cream", "white", "kraft", "none"]
+    assert params["paper"]["default"] == "cream"
+    assert params["relayout"]["options"] == ["8 bars", "16 bars", "32 bars", "never"]
+    # DEFAULT_RELAYOUT and DEFAULTS.misregister: Reduce motion calms them only at these values.
+    assert params["relayout"]["default"] == "8 bars"
+    got = {
+        k: tuple(params[k].get(f) for f in ("type", "min", "max", "step", "default"))
+        for k in ("screen", "misregister", "grain", "reactivity")
+    }
+    assert got == {
+        "screen": ("number", 30, 160, 1, 90),
+        "misregister": ("number", 0, 1, 0.01, 0.5),
+        "grain": ("number", 0, 1, 0.01, 0.4),
+        "reactivity": ("number", 0, 2, 0.05, 1),
+    }
+    for f in ("fullscreen.vert", "plates.frag", "halftone.frag"):
+        assert (REPOS["fieldwork"] / "shaders/misregister" / f).is_file(), f
