@@ -601,6 +601,7 @@ def test_fieldwork_lists_its_visualizers_in_order():
         "plotter",
         "misregister",
         "soapfilm",
+        "miura",
     ]
     for v in m["visualizers"]:
         assert v["author"] == "Fieldwork" and v.get("description") and v.get("thumbnail"), v["id"]
@@ -788,3 +789,33 @@ def test_soapfilm_manifest():
         assert (p["min"], p["max"], p["default"], p["step"]) == (lo, hi, default, 0.05), pid
     for f in ("fullscreen.vert", "state.frag", "composite.frag"):
         assert (REPOS["fieldwork"] / "shaders/soapfilm" / f).is_file()
+
+
+def test_miura_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "miura"]
+    assert (v["name"], v["entry"], v["renderer"], v["libs"], v["thumbnail"]) == (
+        "Miura",
+        "src/miura/miura.js",
+        "three",
+        ["three"],
+        "thumbs/miura.jpg",
+    )
+    assert v["author"] == "Fieldwork" and v["description"]
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == ["paper", "pleat", "sheet", "fold", "reactivity", "light", "shadows"]
+    # Option orders match PAPERS/PLEATS/SHEETS/LIGHTS in src/miura/lib/miura-params.js.
+    assert params["paper"]["options"] == ["washi", "indigo", "vermilion", "foil", "graphite"]
+    assert params["pleat"]["options"] == ["classic", "fine", "bold"]
+    assert params["sheet"]["options"] == ["fill", "float"]
+    assert params["light"]["options"] == ["window", "noon", "low-sun"]
+    assert (params["paper"]["default"], params["pleat"]["default"], params["sheet"]["default"]) == (
+        "washi",
+        "classic",
+        "fill",
+    )
+    assert params["light"]["default"] == "window"
+    assert params["shadows"]["default"] is True
+    # Reduce motion keys off DEFAULT_FOLD and DEFAULT_REACTIVITY (lib/miura-params.js).
+    fold, react = params["fold"], params["reactivity"]
+    assert (fold["min"], fold["max"], fold["step"], fold["default"]) == (0.2, 1.5, 0.05, 1)
+    assert (react["min"], react["max"], react["step"], react["default"]) == (0, 2, 0.05, 1)
