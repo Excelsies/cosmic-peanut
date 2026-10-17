@@ -575,6 +575,13 @@ def test_tetraballs_manifest():
         assert (REPOS["builtin"] / "shaders/tetraballs" / name).is_file()
 
 
+def test_fieldwork_lists_its_visualizers_in_order():
+    m = _manifest("fieldwork")
+    assert [v["id"] for v in m["visualizers"]] == ["chladni", "murmuration", "plotter", "misregister"]
+    for v in m["visualizers"]:
+        assert v["author"] == "Fieldwork" and v.get("description") and v.get("thumbnail"), v["id"]
+
+
 def test_chladni_manifest():
     (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "chladni"]
     assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
@@ -674,3 +681,45 @@ def test_plotter_manifest():
     }
     # lib/plotter-params.js DEFAULT_CHATTER / DEFAULT_SPEED: Reduce motion calms them at these values.
     assert ranges == {"weight": (0.5, 3, 1), "chatter": (0, 1, 0.5), "speed": (0.25, 2, 1)}
+
+
+def test_misregister_manifest():
+    (v,) = [v for v in _manifest("fieldwork")["visualizers"] if v["id"] == "misregister"]
+    assert (v["name"], v["entry"], v["renderer"], v["thumbnail"]) == (
+        "Misregister",
+        "src/misregister.js",
+        "webgl2",
+        "thumbs/misregister.jpg",
+    )
+    assert "libs" not in v
+    assert v.get("description")
+    params = {p["id"]: p for p in v["params"]}
+    assert list(params) == [
+        "palette",
+        "paper",
+        "screen",
+        "misregister",
+        "grain",
+        "relayout",
+        "reactivity",
+    ]
+    # Option order = index order in src/lib/misregister-params.js (PALETTES, PAPERS, RELAYOUT_BARS).
+    assert params["palette"]["options"] == ["riso", "bauhaus", "sunset", "mono"]
+    assert params["palette"]["default"] == "riso"
+    assert params["paper"]["options"] == ["cream", "white", "kraft", "none"]
+    assert params["paper"]["default"] == "cream"
+    assert params["relayout"]["options"] == ["8 bars", "16 bars", "32 bars", "never"]
+    # DEFAULT_RELAYOUT and DEFAULTS.misregister: Reduce motion calms them only at these values.
+    assert params["relayout"]["default"] == "8 bars"
+    got = {
+        k: tuple(params[k].get(f) for f in ("type", "min", "max", "step", "default"))
+        for k in ("screen", "misregister", "grain", "reactivity")
+    }
+    assert got == {
+        "screen": ("number", 30, 160, 1, 90),
+        "misregister": ("number", 0, 1, 0.01, 0.5),
+        "grain": ("number", 0, 1, 0.01, 0.4),
+        "reactivity": ("number", 0, 2, 0.05, 1),
+    }
+    for f in ("fullscreen.vert", "plates.frag", "halftone.frag"):
+        assert (REPOS["fieldwork"] / "shaders/misregister" / f).is_file(), f
