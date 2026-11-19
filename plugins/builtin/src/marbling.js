@@ -5,20 +5,28 @@
  * A GPU feedback simulation of the mathematical-marbling maps (Jaffer et al.): a ping-pong RGBA8
  * texture holds the amount of each of four inks per pixel (paper = the rest). Each frame the pour
  * scheduler (lib/marbling.js) turns the audio into at most 16 events — slices of drops being
- * poured, a stylus step, a whole-pixel drift — appended to a queue of up to 48 pending events.
- * composite.frag shows the texture pushed through all pending events (walking each pixel back
+ * poured, stylus and flick steps, a comb step, a whole-pixel drift — appended to a queue of up
+ * to 48 pending events (the bath's currents ride along as the newest one). composite.frag shows the texture pushed through all pending events (walking each pixel back
  * through their exact inverse maps, events.glsl) and colours the inks with the palette over cream
- * (or clear) paper; only when the queue is full does sim.frag bake them into the other texture,
+ * (or clear) paper; only when the queue is full (or the currents get steep) does sim.frag bake them into the other texture,
  * resampling it sharply (sample.glsl). Baking ~10× less often than every frame is what keeps the
  * veins crisp. The cost per frame is bounded however much has been poured.
  *
- * Beats drop paint (the spectral region that hit picks the size and ink; kicks bring satellite
- * drops → nested cells), a stylus following the spectral centroid rakes clear paper rivers
- * through it, loudness sets the pour rate, and slow drift plus occasional large clear drops renew
- * the page.
+ * The music drives all of it. Every beat pours — several drops on loud beats, landing where the
+ * hit sits in the spectrum (bass left … highs right) in the ink of the part that hit; a dropper
+ * steered by the spectral centroid feeds a stream of small drops at a rate that follows the
+ * loudness, let go on the beats; each bar's downbeat drops a big stone. The bath has currents
+ * (createCurrents: big swirls swelled by the bass, a local vortex per quarter of the spectrum
+ * across the page, a gentle drift; ebbing between beats and surging on them, a central stir on
+ * build-ups) applied as the newest event and baked with the batch, so the paper keeps flowing
+ * between drops and stands still in silence. A stylus following the centroid rakes clear rivers,
+ * snares and hats flick quick strokes, and when the tempo is known a comb sweeps the page every
+ * two or four bars, direction alternating, comb and stylus lurching forward on each beat. Slow
+ * drift and large clear drops renew the page while music plays.
  */
 import { createProgram } from "./lib/gl.js";
 import {
+  createCurrents,
   createEventQueue,
   createMarbler,
   DEFAULTS,
@@ -33,6 +41,8 @@ import {
  * it they widen to ~3.7 px within 1 minute.
  */
 const SHARP = 0.1;
+/** Longest a bake batch runs (s): the currents' vortex centres are frozen within one. */
+const MAX_BATCH = 1.5;
 
 /** @type {import('../tidalviz').CreateVisualizer} */
 export default async function create(ctx) {
@@ -77,7 +87,14 @@ export default async function create(ctx) {
   let inks = [];
   let cur = 0;
   const marbler = createMarbler(0x6d61726c);
+  const currents = createCurrents(0x63757272);
   const queue = createEventQueue();
+  /** u_flow: (drift x, drift y, on, 0), then the six vortices of currents.acc. */
+  const flowU = new Float32Array(28);
+  /** Seconds since the last bake (the currents' vortex centres are frozen per batch). */
+  let batchAge = 0;
+  /** Dev readout for the harness (plugins/_harness): events started this frame, drops, bakes. */
+  const debug = { events: 0, drops: 0, bakes: 0, colors: /** @type {number[][]} */ ([]) };
   const eff = { ...DEFAULTS };
   const env = { aspect: 1, pxPerUnit: 1, reduceFlashing: true, reduceMotion: false };
   const inkColors = new Float32Array(12);
@@ -88,9 +105,17 @@ export default async function create(ctx) {
   let drawnSheen = 0;
   let drawnW = 0;
   let drawnH = 0;
+  // The currents move the paper without an event: the image follows their displacement, and a bake
+  // re-renders it from the resampled texture.
+  const drawnAcc = new Float32Array(currents.acc.length);
+  let drawnActive = false;
+  let baked = false;
+  /** The last draw was a repeat of the one before, so the image is on screen. */
+  let shown = false;
 
   function applyParams() {
     const pal = paletteOf(ctx.params.palette);
+    debug.colors = [...pal.inks, pal.paper];
     for (let i = 0; i < 4; i++) for (let k = 0; k < 3; k++) inkColors[i * 3 + k] = pal.inks[i][k];
     const on = ctx.params.paper !== "none" ? 1 : 0;
     for (let k = 0; k < 3; k++) paper[k] = pal.paper[k] * on;
@@ -114,11 +139,21 @@ export default async function create(ctx) {
     gl.uniform4fv(p.u.u_b, queue.evB);
     gl.uniform4fv(p.u.u_c, queue.evC);
     gl.uniform4fv(p.u.u_d, queue.evD);
+    const f = currents.acc;
+    flowU[0] = f[0];
+    flowU[1] = f[1];
+    flowU[2] = currents.active ? 1 : 0;
+    for (let i = 2; i < f.length; i++) flowU[i + 2] = f[i];
+    gl.uniform4fv(p.u.u_flow, flowU);
   }
 
-  /** Bake the pending events into the other ink texture and empty the queue. */
+  /** Bake the pending events and currents into the other ink texture and empty the queue. */
   function bake() {
-    if (queue.count === 0) return;
+    batchAge = 0;
+    if (queue.count === 0 && !currents.active) {
+      currents.reset();
+      return;
+    }
     const src = inks[cur];
     const dst = inks[cur ^ 1];
     gl.bindVertexArray(vao);
@@ -131,6 +166,10 @@ export default async function create(ctx) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     cur ^= 1;
     queue.clear();
+    if (currents.active) marbler.advect(currents.acc);
+    currents.reset();
+    debug.bakes++;
+    baked = true;
   }
 
   function resize() {
@@ -162,7 +201,9 @@ export default async function create(ctx) {
   applyParams();
   resize();
 
-  return {
+  /** @type {import('../tidalviz').Visualizer & { debug: typeof debug }} */
+  const viz = {
+    debug,
     frame(audio, time) {
       const src = inks[cur];
       effectiveParams(ctx.params, ctx.reduceMotion, eff);
@@ -171,17 +212,36 @@ export default async function create(ctx) {
       env.reduceFlashing = ctx.reduceFlashing;
       env.reduceMotion = ctx.reduceMotion;
       marbler.step(audio, time.dt, eff, env);
+      currents.step(audio, marbler.energy, time.dt, eff, env);
+      batchAge += time.dt;
 
-      if (!queue.fits(marbler.count)) bake();
+      if (!queue.fits(marbler.count) || currents.full() || batchAge > MAX_BATCH) bake();
       queue.append(marbler);
+      debug.events = marbler.started;
+      debug.drops = marbler.drops;
 
-      // No events (so no bake), the same sheen as the shader got and the same size: leave the
-      // canvas on its last image, which a WebGL canvas keeps until the next draw. dt = 0 is a
-      // (re)started loop, e.g. the window was hidden: draw then anyway.
+      // No events, no bake, the same currents (they move the bath between events), the same sheen
+      // as the shader got and the same size: this frame would repeat the last image. dt = 0 is a
+      // (re)started loop, e.g. the window was hidden: draw then anyway. A repeat is skipped only
+      // after one has been drawn. In headless software-GL WebKit (Playwright), a WebGL canvas
+      // created with `antialias: false` showed each draw one draw late (a draw reached the screen
+      // when the next one was made), so a canvas left alone after a single draw stayed on the
+      // image before it. Not measured on WebKitGTK or WKWebView, so the repeat is drawn
+      // defensively. It is identical, so it pushes the real draw to the screen, and later repeats
+      // leave the canvas on its image.
       const { width: w, height: h } = ctx.size;
       const sheen = Math.fround(marbler.sheen);
-      if (drawn && marbler.count === 0 && sheen === drawnSheen && w === drawnW && h === drawnH && time.dt > 0) return;
+      const acc = currents.acc;
+      // (Without displacement the shader skips the flow, whatever centres acc holds.)
+      let sameFlow = currents.active === drawnActive;
+      for (let i = 0; sameFlow && currents.active && i < acc.length; i++) sameFlow = acc[i] === drawnAcc[i];
+      const repeat = drawn && !baked && sameFlow && marbler.count === 0 && sheen === drawnSheen && w === drawnW && h === drawnH && time.dt > 0;
+      if (repeat && shown) return;
+      shown = repeat;
       drawn = true;
+      baked = false;
+      drawnActive = currents.active;
+      drawnAcc.set(acc);
       drawnSheen = sheen;
       drawnW = w;
       drawnH = h;
@@ -215,4 +275,5 @@ export default async function create(ctx) {
       for (const p of [sim, resample, comp]) gl.deleteProgram(p.program);
     },
   };
+  return viz;
 }

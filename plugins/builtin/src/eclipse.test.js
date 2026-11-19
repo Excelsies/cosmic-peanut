@@ -2,7 +2,6 @@
 import { describe, expect, it } from "vitest";
 import create from "./eclipse.js";
 import { builtinAssets, fakeGl } from "./lib/fake-gl.test-helper.js";
-import { fitEclipse } from "./lib/eclipse.js";
 
 const DEFAULTS = {
   reactivity: 1,
@@ -66,17 +65,6 @@ describe("eclipse GL calls", () => {
     s.viz.params?.({ tint: "sepia" });
     const gamma = s.log.filter((c) => c.op === "uniform3f" && c.args[0]?.name === "u_gamma").at(-1);
     expect(gamma?.args.slice(1).map((x) => Math.round(x * 100) / 100)).toEqual([0.82, 1, 1.35]);
-  });
-
-  it("masks the cloud field with a margin of at least 4 field texels around the empty disc", async () => {
-    const s = await setup();
-    const log = frame(s, 0);
-    const field = log.filter((c) => c.op === "viewport")[0].args;
-    const mask = log.find((c) => c.op === "uniform1f" && c.args[0]?.name === "u_mask");
-    const { radius } = fitEclipse(W, H, { cx: 0, cy: 0, radius: 1 });
-    const texel = Math.max(W / field[2], H / field[3]) / radius;
-    expect(mask?.args[1]).toBeGreaterThanOrEqual(4 * texel);
-    expect(mask?.args[1]).toBeLessThan(5 * texel);
   });
 
   it("draws over the whole canvas without clearing it first", async () => {

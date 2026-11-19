@@ -3,6 +3,65 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Beat tracking: Ballroom harness and a new tracker (2026-10-22)
+
+`uv run python -m tools.beat_eval` streams all 698 Ballroom clips hop by hop through the real
+Analyzer (9 s on 10 cores) and scores the beats (each `beatPhase` wrap while `bpm > 0`) with
+mir_eval against the Krebs annotations. `tests/test_beat_eval_ballroom.py` holds these as a floor
+when the dataset is present (`--fetch`, 1.5 GB to `~/.cache/tidalviz/ballroom`).
+
+| Tracker | F | CMLt | AMLt | Acc1 | Acc2 |
+| --- | --- | --- | --- | --- | --- |
+| Old (ACF tempo + onset PLL), all 698 | 0.524 | 0.378 | 0.592 | 0.646 | 0.913 |
+| ChaChaCha (best) | 0.717 | 0.696 | 0.908 | 0.991 | 0.991 |
+| Quickstep (~200 BPM) | 0.485 | 0.001 | 0.720 | 0.000 | 1.000 |
+| Waltz (3/4) | 0.284 | 0.119 | 0.235 | 0.309 | 0.700 |
+| **New (beat score + comb tempo), all 698** | **0.661** | **0.522** | **0.688** | **0.726** | **0.950** |
+| ChaChaCha | 0.763 | 0.751 | 0.813 | 1.000 | 1.000 |
+| Quickstep | 0.534 | 0.000 | 0.754 | 0.000 | 1.000 |
+| Waltz | 0.460 | 0.255 | 0.446 | 0.400 | 0.782 |
+
+- **What moved the numbers** (half-set sweeps, then the full set): the cumulative beat score
+  for phase (α 0.9, tightness 5, the paper's values; F 0.52 → 0.59); holding the tempo through
+  weak estimates instead of dropping after ~1 s (+0.04 F; lock coverage was 82 %, Waltz 43 %);
+  a comb over the ACF at 1–4 × the period with equal weights plus a ±16-frame moving-mean
+  threshold on the envelope (Davies & Plumbley 2007; Acc1 0.64 → 0.73, Waltz and Jive most).
+  Prior (120 BPM, ±1 octave) and range (60–180) were already best; a 220 ceiling trades CMLt
+  for F, and a higher confidence bar costs far more than it saves. Analysis p99 78 µs.
+- **`bpm` is now held until 1 s of silence** (a weak estimate never drops it). The old tracker
+  also locked onto a made-up tempo (148–175 BPM) from silence; it no longer estimates while silent.
+- **The old tracker had tempo mostly right up to an octave (Acc2 0.91); phase and continuity
+  were the weak part (CMLt 0.38).** Quickstep (~200 BPM) sits above the 60–180 search range, so
+  it still always halves (CMLt 0, AMLt fine); Waltz is still the weakest genre.
+- **Libraries ruled out:** madmom (last PyPI release 2018, breaks on Python ≥ 3.10, models
+  CC BY-NC-SA), BeatNet (needs madmom + PyTorch), BTrack/aubio (GPL) and essentia (AGPL) under
+  our MIT license, librosa (offline only); `analysis/rhythm.py` implements the published
+  algorithms instead (cumulative score: Stark, Davies & Plumbley, DAFx 2009).
+- **Tie-Dye moves on the beat:** with a confident tempo an onset's surge is scaled to 0.2 and the
+  dye swell follows the beat; before, an off-beat onset pushed the flow further than a beat
+  (0.161 vs 0.129 unit radii).
+
+## More reactive backgrounds: Tie-Dye, Skull Trip, Dark Sun, Eclipse, Marbling (2026-10-21)
+
+Background motion = mean frame-to-frame pixel change over the background (subject excluded),
+5–10 s deterministic windows in the harness; beat response = motion 150 ms after a strong onset
+÷ 150 ms before. Each agent used its own meter, so compare rows, not visualizers.
+
+| Visualizer | Loud ÷ silence (main → now) | Beat response (main → now) | What changed |
+| --- | --- | --- | --- |
+| Tie-Dye | 2.6 → 7.6 | 1.29 → 1.57 | new bands born per beat, coloured by the spectrum; auto pattern morphs every 32 beats |
+| Skull Trip | 3.4 → 8.9 | 2.57 → 2.85 | stripes are contours of a distance field: closed loops born at beat-seeded emitters grow off screen |
+| Dark Sun | 4.2 → 64.5 | 2.49 → 3.90 | flowing washes, beat-locked range drop and horizon shock, ground ripples; sun 2.4 → 32 |
+| Eclipse | 1.3 → 19.6 (30.8 with water) | 1.01 → 1.45 | orbiting, re-forming clouds; water reflection (off/low/mid) |
+| Marbling | ~3–9 → ~260 | 1.7–3.1 → 4.2 | every beat pours (by spectrum), currents between drops, tempo-locked combing |
+
+- **Skull Trip is budget-limited on purpose:** every stripe motion shares one per-pixel alternation
+  budget (≤ 3 Hz with Reduce flashing). On main the skull's nod/chomp moved every contour and spent
+  most of it; the field now uses the skull's rest outline and the budget goes to the background.
+- **Silence:** several visualizers now move *less* in silence than before, by design.
+- **Harness:** each agent wrote its own motion meter; kept one built-in meter (`meter=1`, named
+  zones) plus `motion_hook.py`; `silent=1` now zeroes levels in every audio mode.
+
 ## Blaze: flame-test materials and sparks (2026-10-15)
 
 Eleven new palettes after the original four: propane, copper, boron, sodium, lithium, strontium,
