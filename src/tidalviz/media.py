@@ -185,6 +185,15 @@ class MediaBridge:
                 self._broadcast({"type": "status", "level": level, "text": text[:STATUS_MAX]})
             )
 
+    async def open_files(self, paths: Sequence[Path], *, replace: bool) -> bool:
+        """Queue files on the active source (off the loop: a folder walk blocks). False when the
+        active source has no queue."""
+        src = self._source
+        if not isinstance(src, QueueControl):
+            return False
+        await asyncio.to_thread(src.open, list(paths), replace=replace)
+        return True
+
     # --- commands in --------------------------------------------------------------------------
 
     def handle(self, msg: dict[str, Any]) -> None:

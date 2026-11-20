@@ -598,14 +598,12 @@ async def test_a_second_open_while_a_dialog_is_up_is_ignored(started, fake, http
     await shell.next_json("hello")
     for _ in range(3):
         await shell.send({"type": "playerOpen", "kind": "files", "replace": False})
-    await asyncio.sleep(0.3)
+    await shell.send({"type": "playerClear"})  # messages are handled in order: once this has
+    assert await calls_of(fake[0], "clear")  # arrived, the three opens above have been dealt with
+    assert len(window.dialogs) <= 1  # the ignoring is decided as each message is handled
     release.set()
-    for _ in range(100):
-        if any(c[0] == "open" for c in fake[0].calls):
-            break
-        await asyncio.sleep(0.01)
-    await asyncio.sleep(0.3)
-    assert len(window.dialogs) == 1 and [c[0] for c in fake[0].calls] == ["open"]
+    assert await calls_of(fake[0], "open")
+    assert len(window.dialogs) == 1 and [c[0] for c in fake[0].calls] == ["clear", "open"]
     await shell.send(
         {"type": "playerOpen", "kind": "files", "replace": False}
     )  # the next one works
@@ -640,3 +638,151 @@ async def test_a_new_serial_alone_is_a_change_worth_a_now_playing(started, fake,
     # The same track selected again restarts it: nothing but the serial differs.
     fake[0].change(np=dataclasses.replace(fake[0].np, serial=1))
     assert (await shell.next_json("nowPlaying"))["serial"] == 1
+
+
+# --- files handed to the host: the command line and a second launch ------------------------------------------------
+
+
+async def calls_of(fake: FakeTransportSource, kind: str) -> list[Any]:
+    for _ in range(100):
+        got = [c for c in fake.calls if c[0] == kind]
+        if got:
+            return got
+        await asyncio.sleep(0.01)
+    return []
+
+
+@pytest.mark.asyncio
+async def test_open_paths_replaces_the_queue_of_the_active_player(started, fake, http):
+    host, _ = await started()
+    await host.open_paths([Path("/m/a.mp3"), Path("/m/album")])
+    (call,) = await calls_of(fake[0], "open")
+    assert call[1:3] == ([Path("/m/a.mp3"), Path("/m/album")], True)
+    assert call[3] != threading.current_thread().name  # off the loop
+
+
+@pytest.mark.asyncio
+async def test_open_paths_switches_to_the_player_and_the_shell_follows(started, fake, http):
+    host, _ = await started("synthetic:demo")
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await host.open_paths([Path("/m/a.mp3")])
+    msg = await shell.next_json("sources")
+    assert msg["active"] == "player" and msg["transport"] is True
+    assert host._active_source == "player"
+    assert host.settings.data["source"] == "system"  # the user did not choose it: not saved
+    (call,) = await calls_of(fake[0], "open")
+    assert call[1:3] == ([Path("/m/a.mp3")], True)
+
+
+@pytest.mark.asyncio
+async def test_open_paths_without_the_engine_says_so_to_the_shell_that_connects_later(
+    started, monkeypatch: pytest.MonkeyPatch, http
+):
+    from tidalviz import host as host_module
+
+    host, _ = await started("synthetic:demo")
+    monkeypatch.setattr(host_module, "player_available", lambda: False)
+    await host.open_paths([Path("/home/me/secret/a.mp3")])  # no shell yet: the notice waits
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    status = await shell.next_json("status")
+    assert status["text"] == "Cannot open files: the file player needs GStreamer"
+    assert host._active_source == "synthetic:demo"
+
+
+@pytest.mark.asyncio
+async def test_a_status_from_the_player_before_any_shell_connects_is_not_lost(started, fake, http):
+    host, _ = await started()
+    fake[0].status("info", "No audio files found")
+    await asyncio.sleep(0.2)
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    assert (await shell.next_json("status"))["text"] == "No audio files found"
+
+
+# --- the launch's source never leaks into the saved settings (review 6, S1) ---------------------------------------
+
+
+def saved_source(host: Host) -> str:
+    from tidalviz.settings import Settings
+
+    return Settings(host.settings.path).data["source"]
+
+
+@pytest.mark.asyncio
+async def test_a_launch_with_files_does_not_make_the_player_the_saved_source(started, fake, http):
+    host, _ = await started("player")  # what `tidalviz FILE` does
+    host.settings.update({"quality": "high"})  # any later change saves the whole dict
+    assert host._active_source == "player" and saved_source(host) == "system"
+
+
+@pytest.mark.asyncio
+async def test_a_hand_over_switches_for_this_run_only(started, fake, http):
+    host, _ = await started("synthetic:demo")
+    await host.open_paths([Path("/m/a.mp3")])
+    host.settings.update({"quality": "high"})
+    assert host._active_source == "player" and saved_source(host) == "system"
+    shell = await connect(host, http)
+    assert (await shell.next_json("hello"))["activeSource"] == "player"
+
+
+@pytest.mark.asyncio
+async def test_the_users_own_choice_in_the_shell_is_still_saved(started, fake, http):
+    host, _ = await started("synthetic:demo")
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await shell.send({"type": "setSource", "id": "player"})
+    await shell.next_json("sources")
+    assert saved_source(host) == "player"
+
+
+# --- closing, and files that could not be opened (S5) ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_hand_over_during_shutdown_creates_no_source(tmp_path: Path, fake, http):
+    h = Host(
+        root=tmp_path / "home",
+        builtin_dirs=BUILTINS,
+        source_id="synthetic:demo",
+        window=DialogWindow(),
+    )
+    await h.start()
+    await h.stop()
+    await h.open_paths([Path("/m/a.mp3")])  # a late `ok` from the listener: nothing happens
+    assert fake == [] and h._active_source == "synthetic:demo"
+
+
+@pytest.mark.asyncio
+async def test_files_dropped_because_the_source_could_not_be_started_are_reported(
+    started, fake, http, monkeypatch: pytest.MonkeyPatch
+):
+    from tidalviz import host as host_module
+
+    def refuse(root: Path):
+        raise ValueError("no")
+
+    host, _ = await started("synthetic:demo")
+    monkeypatch.setattr(host_module, "player_source", refuse)
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await host.open_paths([Path("/home/me/secret/a.mp3")])
+    texts = []
+    for _ in range(2):
+        texts.append((await shell.next_json("status"))["text"])
+    assert "Could not open the chosen files" in texts and not any("secret" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_a_failure_while_opening_gets_the_fixed_status_not_silence(started, fake, http):
+    host, _ = await started()
+
+    async def boom(paths, *, replace):
+        raise RuntimeError("/home/me/secret exploded")
+
+    host.media.open_files = boom  # type: ignore[method-assign]
+    shell = await connect(host, http)
+    await shell.next_json("hello")
+    await host.open_paths([Path("/m/a.mp3")])
+    assert (await shell.next_json("status"))["text"] == "Could not open the chosen files"

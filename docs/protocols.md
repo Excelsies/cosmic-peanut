@@ -294,3 +294,39 @@ SDK → shell (port):
 
 Every message is untrusted: the shell checks `type` and field types and renders strings with
 `textContent` only.
+
+## 6. Instance hand-over (second launch → running instance)
+
+`tidalviz PATH...` with an instance already running on the same data dir (`--home` or the default)
+sends it the paths and exits 0 without a window; the running instance switches to the `player`
+source if needed (as a `setSource` would; the shell follows) and opens them with replace
+(`Host.open_paths`, the same call the first launch makes for its own paths). The switch is for this run only: neither the files on the command line nor a hand-over change the saved `source` (only the user choosing a source in the shell does), so the next launch without files starts on the source the user last chose; a later settings change cannot save it by accident. A launch without paths
+never hands over and never refuses: a second window is still possible. Implemented in
+`tidalviz/instance.py`; `--bench` runs take no part.
+
+- **Socket.** A Unix domain socket, `<runtime dir>/tidalviz/<h>.sock`, `h` = the first 16 hex digits of
+  SHA-256 of the resolved data dir, so every data dir (and every test) has its own. The runtime dir is
+  `$XDG_RUNTIME_DIR` when it is set and absolute, else `<tmp>/tidalviz-<uid>` (macOS: the per-user
+  `$TMPDIR`); when the first would exceed 100 bytes (`sun_path` holds 104–108) the second is used.
+  The directory is created `0700`, and refused (no listener, no hand-over, normal start) unless it is
+  a directory owned by the user with no group or other permission bits; the socket is `0600`.
+- **Taking the socket.** A launch takes an exclusive `flock` on `<h>.lock` beside it and, holding it,
+  looks at the socket: absent → bind and listen; connect refused (a crashed instance's leftover) →
+  unlink and bind; accepted → a running instance (with paths: send them; without: start without a
+  listener); not a socket → left alone, start normally. Launches racing each other therefore queue on
+  the lock: exactly one binds, the others hand their files to it. A listener that accepts but does not
+  answer within 3 s counts as unreachable: the launch starts normally with its own paths.
+- **Message.** One line of JSON from the client, `{"v": 1, "paths": ["/abs/one", "/abs/two"]}` + `\n`;
+  the listener answers `ok\n` or `error\n` and closes. `ok` means received and accepted, not opened: the reply is sent before the files are handed to the host, which opens them on its own thread (a callback that takes long or fails never delays or fails the sender; a failure there reaches the shell as a `status`). Limits: 1 MiB per message, 1–1000
+  paths, each a string of at most 4096 characters that starts with `/` and holds no NUL. Anything else
+  (not JSON, wrong version, relative path, ...) gets `error\n`; a client that does not finish its line
+  within 2 s, or sends more than the limit, is dropped. One bad client never stops the listener or the
+  app, and an exception in opening the files is logged only.
+- **What the host does.** The paths go through the same `QueueControl.open(paths, replace=True)` as the
+  dialog, so the same bounds and `status` texts apply (the extension allowlist filters folder walks; a file named explicitly is judged by the preflight, as with the dialog); chosen paths that do not exist are counted in one `status` (`1 file was not found` / `N files were not found`), never named; no text sent to the shell
+  contains a path. With no GStreamer the host sends `status` "Cannot open files: the file player needs
+  GStreamer" (kept for a shell that connects later) and changes nothing. Raising or focusing the
+  window is not attempted.
+- **Late or failed opens.** A hand-over that arrives while the host is shutting down is ignored (no source is created on a stopping pipeline). If the files could not be opened (the source could not be started, an unexpected error) the shell gets the status "Could not open the chosen files".
+- **Accept errors.** An unexpected error from `accept` is logged once and retried; 50 in a row end the listener with one more log line (a later launch then finds nobody listening and starts normally); a good accept resets the count.
+- **Shutdown.** A clean exit closes the socket and removes the file.

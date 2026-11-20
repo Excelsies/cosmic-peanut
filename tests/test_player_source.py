@@ -1235,3 +1235,34 @@ def test_a_folder_walk_cut_by_the_entry_cap_keeps_the_first_files_and_says_so(
     ]
     assert [e.title for e in src.queue().entries] == ["a", "b"]
     src.stop()
+
+
+# --- chosen paths that do not exist (a count, never a name) -----------------------------------------------------------
+
+
+def test_missing_paths_next_to_good_ones_are_counted_in_one_status(
+    make, media: Media, tmp_path: Path
+):
+    src, rec = make()
+    src.start(rec.on_samples)
+    src.open(
+        [tmp_path / "secret-gone-1.mp3", media.tone_a, tmp_path / "secret-gone-2.mp3"], replace=True
+    )
+    assert wait_until(lambda: src.now_playing().count == 1)
+    assert rec.statuses == [("warn", "2 files were not found")]
+    src.stop()
+
+
+def test_a_single_missing_path_alone_is_one_status(make, tmp_path: Path):
+    src, rec = make()
+    src.open([tmp_path / "secret-gone.mp3"], replace=True)
+    assert rec.statuses == [("warn", "1 file was not found")]  # that already covers every path
+    assert not any("secret" in t for _, t in rec.statuses)
+
+
+def test_a_missing_path_next_to_a_folder_without_audio_still_says_no_audio(make, tmp_path: Path):
+    src, rec = make()
+    (tmp_path / "covers").mkdir()
+    (tmp_path / "covers" / "a.jpg").write_bytes(b"x")
+    src.open([tmp_path / "gone.mp3", tmp_path / "covers"], replace=True)
+    assert rec.statuses == [("warn", "1 file was not found"), ("info", "No audio files found")]

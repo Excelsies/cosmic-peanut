@@ -178,6 +178,13 @@ class PlayerSource:
         """Files and folders; folders are searched here, on the caller's thread. Nothing found
         changes nothing (and says so)."""
         found = collect_audio_files(paths)
+        if found.missing:  # a count, never the names
+            n = found.missing
+            self._report(
+                "warn", f"{n} file was not found" if n == 1 else f"{n} files were not found"
+            )
+        if not found.files and found.missing == len(paths):
+            return  # every path was missing, and that was said: no second status
         if not found.files:
             self._report(
                 "warn" if found.truncated else "info",

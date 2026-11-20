@@ -42,6 +42,7 @@ def _part_key(part: str) -> tuple[str | int, ...]:
 class Collected(NamedTuple):
     files: list[Path]
     truncated: bool  # a bound stopped the walk: there may be more than was collected
+    missing: int = 0  # chosen paths that are neither a file nor a folder
 
 
 def collect_audio_files(
@@ -56,6 +57,7 @@ def collect_audio_files(
     entries and little audio). Unreadable entries are skipped."""
     out: list[Path] = []
     truncated = False
+    missing = 0
     budget = [entry_limit]  # entries still allowed, shared by all the folders
     for path in paths:
         if len(out) >= limit or budget[0] <= 0:
@@ -69,7 +71,8 @@ def collect_audio_files(
             out.append(path)
         else:
             log.warning("not a file or folder, skipped: %s", path.name)
-    return Collected(out, truncated)
+            missing += 1
+    return Collected(out, truncated, missing)
 
 
 def _entries(folder: Path, budget: list[int]) -> list[os.DirEntry[str]]:

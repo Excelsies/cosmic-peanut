@@ -51,6 +51,13 @@ change each of these under **Settings**. **Background opacity** (default 0) and 
 Options: `--source system | app:<pid> | synthetic:demo | player`, `--dev <folder>` (below), and
 `--bench <visualizer> --seconds 60` (writes a performance report).
 
+**Playing files:** `tidalviz [PATH ...]` plays audio files and folders (or `file://` URIs) with the
+Files source (see [Linux](#linux) for what it needs); relative paths are taken from where you run
+it. If Tidalviz is already running on the same data dir, the files are handed to that window, which
+switches to Files and plays them, and the new process exits without a window. Paths cannot be
+combined with `--bench` or a `--source` other than `player`. Without GStreamer the window opens as
+usual with a note that the files could not be opened.
+
 ## Linux
 
 Linux works with PipeWire (the default on current Fedora, Ubuntu and Arch). Capture needs no
@@ -72,6 +79,15 @@ uv run --extra gtk tidalviz
   folder and Tidalviz plays them while visualizing exactly what it plays. It plays to the default
   output; `TIDALVIZ_PLAYER_SINK=pulsesink:<sink name>` pins it to one PulseAudio/PipeWire sink; if that sink disappears, PipeWire moves the playback to the default output (it does not stop).
   Without GStreamer the entry is not shown.
+- **Open with / default player:** `uv run python -m tools.desktop_entry install` writes
+  `~/.local/share/applications/cosmic-peanut.desktop` (it runs this checkout through `uv`, from any
+  directory) so Tidalviz appears under "Open with" for audio files. `set-default` makes it the
+  default for the audio types (it decides from the explicit entries of `~/.config/mimeapps.list`,
+  copies that file to a timestamped `.bak-` file first, and prints each previous and new handler;
+  `video/x-ms-asf`, which `xdg-mime query filetype` says for a `.wma` but which also covers ASF
+  video, is left alone unless you pass `--include-asf`), `status` shows what is
+  installed and who is the default, `uninstall` removes the entry and leaves `mimeapps.list` alone,
+  printing the backup to copy back. Double-clicking a second file hands it to the running window.
 - **Float on top** is the compositor's job on Wayland, so that setting does nothing there; use your
   compositor's own float toggle (Hyprland's works as is).
 - **NVIDIA:** Tidalviz sets `__NV_DISABLE_EXPLICIT_SYNC=1` to avoid a WebKitGTK crash on Wayland;
