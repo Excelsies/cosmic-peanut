@@ -352,7 +352,7 @@ Tidalviz is a standalone desktop app with its own window that sits anywhere on t
 - **Library:** a grid of installed visualizers with thumbnail, name, repo and a 2D/3D badge. From here users can add a URL, add a dev folder, update, roll back or remove.
 - **Parameters:** controls generated from the manifest's `params`. Values persist per visualizer, with a reset.
 - **Auto-cycle:** optionally move to the next visualizer every N seconds (off by default), with a 1.5 s crossfade. During the fade both iframes render, and the frame-rate budget is relaxed for that window.
-- **Keys:** N and Shift+N for next and previous, F full screen, H hide overlays, L library, P perf HUD, Esc close panels.
+- **Keys:** N and Shift+N for next and previous, F full screen, H hide overlays, L library, P perf HUD, Esc close panels. With the Files source: Space play/pause (a focused control keeps Space), Left and Right seek 5 s, comma and period previous and next track, Q the queue panel.
 - **Permission help:** when a source is silent because permission is missing, show one sentence of explanation and a button that opens System Settings at the right Privacy & Security pane, where macOS allows deep links.
 - **Photosensitivity:** a first-launch notice about flashing visuals, and a "Reduce flashing" setting, on by default. The SDK passes it as `ctx.reduceFlashing`, and reference plugins must cap full-screen brightness changes at 3 per second when it's on.
 - **Accessibility:** every control reachable by keyboard, visible focus rings, and text rendered at the system font size.

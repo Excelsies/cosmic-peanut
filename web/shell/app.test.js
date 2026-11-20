@@ -378,7 +378,7 @@ describe("app: host messages", () => {
     sel.value = "app:7";
     sel.dispatchEvent(new Event("change"));
     expect(last("setSource")).toEqual({ type: "setSource", id: "app:7" });
-    app.handle({ type: "sources", sources: [{ id: "system", name: "All audio" }], active: "system" });
+    app.handle({ type: "sources", sources: [{ id: "system", name: "All audio" }], active: "system", transport: false });
     expect(sel.options).toHaveLength(1);
   });
 

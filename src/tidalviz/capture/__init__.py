@@ -1,6 +1,7 @@
 """PCM producers (docs/protocols.md §2) and the ring buffer they feed."""
 
 import sys
+from pathlib import Path
 
 from tidalviz.capture.base import AudioSource, OnSamples, SourceFormat
 from tidalviz.capture.file import FileSource, read_wav
@@ -17,6 +18,8 @@ __all__ = [
     "SyntheticSource",
     "app_source",
     "list_audio_apps",
+    "player_available",
+    "player_source",
     "read_wav",
     "system_source",
 ]
@@ -54,3 +57,17 @@ else:
 
     def app_source(app: AudioApp) -> AudioSource:
         return PipeWireAppSource(app)
+
+
+def player_available() -> bool:
+    """Whether the local-file player can run here (it needs GStreamer, i.e. the `gtk` extra)."""
+    from tidalviz.player import engine_available
+
+    return engine_available()
+
+
+def player_source(root: Path) -> AudioSource:
+    """The local-file player, keeping its queue under ``root``. ValueError without GStreamer."""
+    from tidalviz.player import create_source
+
+    return create_source(root)

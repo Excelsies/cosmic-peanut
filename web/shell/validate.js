@@ -17,6 +17,10 @@
  * @typedef {{ repo: string; url: string | null; path: string | null; commit: string | null;
  *   previous: string | null; dev: boolean; builtin: boolean }} RepoInfo
  * @typedef {{ id: string; name: string }} SourceInfo
+ * @typedef {{ artist: string; album: string; title: string; duration: number | null; position: number;
+ *   playing: boolean; index: number | null; count: number; hostTime: number; serial: number }} NowPlaying
+ * @typedef {{ title: string; artist: string; album: string; duration: number | null; playable: boolean }} QueueEntry
+ * @typedef {{ entries: QueueEntry[] }} Queue
  * @typedef {{ quality?: QualityMode; reduceFlashing?: boolean; autoCycleSeconds?: number;
  *   hudVisible?: boolean; photosensitivityNoticeSeen?: boolean; transparent?: boolean;
  *   backgroundOpacity?: number; visualOpacity?: number }} Settings
@@ -25,14 +29,16 @@
  *
  * @typedef {{ type: "hello"; version: number; pluginOrigin: string; visualizers: VizInfo[]; repos: RepoInfo[];
  *     settings: Settings; sources: SourceInfo[]; activeSource: string | null; active: string | null; dev: boolean;
- *     refreshHz: number }
+ *     refreshHz: number; transport: boolean; nowPlaying: NowPlaying | null; queue: Queue | null }
  *   | { type: "visualizers"; visualizers: VizInfo[]; repos: RepoInfo[] }
  *   | { type: "reload"; key: string }
  *   | { type: "manifestError"; repo: string; errors: { path: string; message: string }[] }
- *   | { type: "sources"; sources: SourceInfo[]; active: string | null }
+ *   | { type: "sources"; sources: SourceInfo[]; active: string | null; transport: boolean }
  *   | { type: "status"; level: "info" | "warn" | "error"; text: string; id?: string }
  *   | { type: "silence"; silent: boolean; seconds: number }
  *   | ({ type: "stats" } & Stats)
+ *   | ({ type: "nowPlaying" } & NowPlaying)
+ *   | ({ type: "queue" } & Queue)
  *   | { type: "installPrompt"; id: string; url: string; commit: string; visualizers: { id: string; name: string }[] }
  *   | { type: "installResult"; id: string; ok: boolean; error?: string }
  *   | { type: "updates"; repos: { repo: string; commit: string; message: string }[] }
@@ -64,6 +70,10 @@ const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v) &&
 const isStrOrNull = (v) => v === null || isStr(v);
 /** @param {unknown} v @returns {v is number} */
 const isCount = (v) => isNum(v) && v >= 0 && Number.isInteger(v);
+
+/** docs/protocols.md §4: `nowPlaying` strings, and the queue's length. */
+export const MAX_TEXT = 200;
+export const MAX_QUEUE = 2000;
 
 const LEVELS = ["info", "warn", "error"];
 const QUALITIES = ["auto", "high", "balanced", "battery"];
@@ -171,6 +181,48 @@ function parseSource(v) {
   return isObj(v) && isStr(v.id) && isStr(v.name) ? { id: v.id, name: v.name } : null;
 }
 
+/** @param {unknown} v @returns {string | null} A string cut to MAX_TEXT, or null if it is not one. */
+const text = (v) => (isStr(v) ? v.slice(0, MAX_TEXT) : null);
+/** @param {unknown} v @returns {v is number | null} */
+const isDuration = (v) => v === null || (isNum(v) && v >= 0);
+
+/** The fields of a `nowPlaying` message, also `hello.nowPlaying`. @param {unknown} v @returns {NowPlaying | null} */
+function parseNowPlaying(v) {
+  if (!isObj(v)) return null;
+  const artist = text(v.artist), album = text(v.album), title = text(v.title);
+  const { duration, position, playing, index, count, hostTime, serial } = v;
+  if (artist === null || album === null || title === null) return null;
+  if (!isDuration(duration) || !isNum(position) || position < 0 || !isBool(playing) || !isNum(hostTime) || !isCount(serial)) return null;
+  if (!isCount(count) || count > MAX_QUEUE) return null;
+  if (index !== null && !(isCount(index) && index < count)) return null;
+  return { artist, album, title, duration, position, playing, index, count, hostTime, serial };
+}
+
+/** @param {unknown} v @returns {QueueEntry | null} */
+function parseEntry(v) {
+  if (!isObj(v)) return null;
+  const title = text(v.title), artist = text(v.artist), album = text(v.album);
+  if (title === null || artist === null || album === null || !isDuration(v.duration) || !isBool(v.playable)) return null;
+  return { title, artist, album, duration: v.duration, playable: v.playable };
+}
+
+/**
+ * The whole queue or nothing: an entry can't be skipped, since every later entry's index would
+ * stop matching the host's (`playerSelect` sends indexes).
+ * @param {unknown} v @returns {Queue | null}
+ */
+function parseQueue(v) {
+  if (!isObj(v) || !Array.isArray(v.entries) || v.entries.length > MAX_QUEUE) return null;
+  /** @type {QueueEntry[]} */
+  const entries = [];
+  for (const raw of v.entries) {
+    const e = parseEntry(raw);
+    if (e === null) return null;
+    entries.push(e);
+  }
+  return { entries };
+}
+
 /** Same floor as VISUAL_OPACITY_MIN in src/tidalviz/settings.py. */
 export const VISUAL_OPACITY_MIN = 0.1;
 
@@ -218,6 +270,9 @@ export function parseHostMessage(text) {
         active: isStr(m.active) ? m.active : null,
         dev: m.dev === true,
         refreshHz: isNum(m.refreshHz) && m.refreshHz >= 0 ? m.refreshHz : 0,
+        transport: m.transport === true,
+        nowPlaying: parseNowPlaying(m.nowPlaying),
+        queue: parseQueue(m.queue),
       };
     }
     case "visualizers": {
@@ -235,12 +290,22 @@ export function parseHostMessage(text) {
     }
     case "sources": {
       const sources = list(m.sources, parseSource);
-      return sources ? { type: "sources", sources, active: isStr(m.active) ? m.active : null } : null;
+      return sources
+        ? { type: "sources", sources, active: isStr(m.active) ? m.active : null, transport: m.transport === true }
+        : null;
     }
     case "status": {
       if (!isStr(m.text) || !isStr(m.level) || !LEVELS.includes(m.level)) return null;
       const level = /** @type {"info" | "warn" | "error"} */ (m.level);
       return isStr(m.id) ? { type: "status", level, text: m.text, id: m.id } : { type: "status", level, text: m.text };
+    }
+    case "nowPlaying": {
+      const np = parseNowPlaying(m);
+      return np && { type: "nowPlaying", ...np };
+    }
+    case "queue": {
+      const q = parseQueue(m);
+      return q && { type: "queue", ...q };
     }
     case "silence":
       return isBool(m.silent) && isNum(m.seconds) ? { type: "silence", silent: m.silent, seconds: m.seconds } : null;

@@ -7,6 +7,7 @@ import { createIdle } from "./idle.js";
 import { keyAction } from "./keys.js";
 import { renderLibrary } from "./library.js";
 import { renderParams, resolveValues } from "./params.js";
+import { createPlayer } from "./player.js";
 import { createPluginHost, formatError } from "./pluginHost.js";
 import { qualityProfile } from "./quality.js";
 import { VISUAL_OPACITY_MIN } from "./validate.js";
@@ -21,7 +22,7 @@ import { VISUAL_OPACITY_MIN } from "./validate.js";
  * @typedef {import("./validate.js").QualityMode} QualityMode
  * @typedef {import("./pluginHost.js").PluginEvent} PluginEvent
  * @typedef {ReturnType<typeof createPluginHost>} PluginHost
- * @typedef {"library" | "params" | "settings"} PanelName
+ * @typedef {"library" | "params" | "settings" | "queue"} PanelName
  *
  * @typedef {object} AppDeps
  * @property {HTMLElement} root
@@ -99,6 +100,7 @@ export function createApp(deps) {
   const libraryBody = h("div", { class: "panel-body" });
   const paramsBody = h("div", { class: "panel-body" });
   const settingsBody = h("div", { class: "panel-body" });
+  const player = createPlayer({ root, bar: () => bottombar, send, toggleQueue: () => togglePanel("queue"), closePanels: () => closePanels(), visible });
   /** @param {PanelName} name @param {string} title @param {HTMLElement} body @param {string} cls */
   const panel = (name, title, body, cls) =>
     h(
@@ -116,6 +118,7 @@ export function createApp(deps) {
     library: panel("library", "Library", libraryBody, "sheet"),
     params: panel("params", "Parameters", paramsBody, "drawer"),
     settings: panel("settings", "Settings", settingsBody, "drawer"),
+    queue: panel("queue", "Queue", player.queueBody, "drawer"),
   };
 
   const hudEl = h("div", { id: "hud", class: "hud", "aria-label": "Performance" });
@@ -221,6 +224,7 @@ export function createApp(deps) {
     panels.library,
     panels.params,
     panels.settings,
+    panels.queue,
     h("div", { class: "toasts overlay-keep" }, errorBox, permission),
     devlog,
     notice,
@@ -586,6 +590,7 @@ export function createApp(deps) {
     openPanel = name;
     if (name === "library" && libStale) renderLib();
     if (name === "params" && paramsStale) renderParamsPanel();
+    if (name === "queue") player.renderQueue();
     root.classList.add("panel-open");
     idle.poke();
     const target = /** @type {HTMLElement | null} */ (panels[name].querySelector("input, select, button:not(.close)") ?? panels[name].querySelector("button"));
@@ -623,6 +628,7 @@ export function createApp(deps) {
 
   function applyOverlayClasses() {
     root.classList.toggle("overlays-hidden", overlaysHidden);
+    player.sync();
   }
 
   /** @param {KeyboardEvent} ev */
@@ -641,6 +647,7 @@ export function createApp(deps) {
       return;
     }
     if (modalOpen() || ev.repeat) return;
+    if (player.key(action, ev)) return;
     ev.preventDefault();
     switch (action) {
       case "next":
@@ -686,6 +693,7 @@ export function createApp(deps) {
   function applyVisibility() {
     const v = visible();
     pluginHost.setVisible(v);
+    player.sync();
     armCycle();
     // Hidden pages' timers are throttled past the hang threshold: the host pauses its watchdog.
     send({ type: "visibility", visible: v });
@@ -698,8 +706,8 @@ export function createApp(deps) {
 
   const idle = createIdle(doc, {
     timeoutMs: IDLE_MS,
-    onChange: (v) => root.classList.toggle("idle", v),
-    hold: () => openPanel !== null || modalOpen() || (doc.activeElement !== null && doc.activeElement !== doc.body && root.contains(doc.activeElement) && !stage.contains(doc.activeElement) && doc.activeElement.closest(".panel") !== null),
+    onChange: (v) => (root.classList.toggle("idle", v), player.sync()),
+    hold: () => player.holdsOverlay() || openPanel !== null || modalOpen() || (doc.activeElement !== null && doc.activeElement !== doc.body && root.contains(doc.activeElement) && !stage.contains(doc.activeElement) && doc.activeElement.closest(".panel") !== null),
   });
 
   renderSettings();
@@ -710,6 +718,7 @@ export function createApp(deps) {
   // ---- host messages -------------------------------------------------------------------------
   /** @param {HostMessage} msg */
   function handle(msg) {
+    player.handle(msg);
     switch (msg.type) {
       case "hello": {
         visualizers = msg.visualizers;

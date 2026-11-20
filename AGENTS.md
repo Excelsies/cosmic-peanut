@@ -48,7 +48,7 @@ npm run typecheck   # tsc --checkJs, strict
 ## Layout
 
 ```
-src/tidalviz/   capture/ analysis/ transport/ server/ plugins/ app.py
+src/tidalviz/   capture/ analysis/ transport/ server/ plugins/ player/ media.py app.py
 web/sdk/        runs inside each plugin iframe (sdk.js, tidalviz.d.ts)
 web/shell/      host UI in the main WKWebView document
 web/vendor/     vendored, pinned third-party code (three.js)

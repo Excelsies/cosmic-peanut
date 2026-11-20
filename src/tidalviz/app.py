@@ -37,7 +37,9 @@ def builtin_dirs() -> list[Path]:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="tidalviz", description=__doc__)
     p.add_argument("--dev", type=Path, help="plugin folder to hot-reload (enables Web Inspector)")
-    p.add_argument("--source", help="system | app:<pid> | synthetic:<kind> (this launch only)")
+    p.add_argument(
+        "--source", help="system | app:<pid> | synthetic:<kind> | player (this launch only)"
+    )
     p.add_argument("--bench", metavar="KEY", help="benchmark a visualizer and write a report")
     p.add_argument("--seconds", type=int, default=60, help="benchmark length")
     p.add_argument("--out", type=Path, default=Path("bench.json"), help="benchmark report path")
