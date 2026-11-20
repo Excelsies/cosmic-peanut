@@ -110,6 +110,17 @@ async def http() -> AsyncIterator[aiohttp.ClientSession]:
         yield s
 
 
+async def visibility_until(shell: "Shell", visible: bool, timeout: float = 3.0) -> dict[str, Any]:
+    """The first `windowVisibility` message with this value. The host may send the same state
+    twice around a connect (a broadcast and greet's own message), so a test must not take the next
+    message as the answer to what it just did."""
+    async with asyncio.timeout(timeout):
+        while True:
+            msg = await shell.next_json("windowVisibility", timeout=timeout)
+            if msg["visible"] is visible:
+                return msg
+
+
 async def connect(host: Host, http: aiohttp.ClientSession) -> Shell:
     s = host.servers
     ws = await http.ws_connect(f"{s.shell_origin}/ws?token={s.token}", origin=s.shell_origin)
@@ -832,16 +843,86 @@ async def test_under_hyprland_the_window_follows_its_workspace(
     try:
         shell = await connect(h, http)  # a shell connecting later learns the current state
         await shell.next_json("hello")
-        msg = await shell.next_json("windowVisibility")
-        if msg["visible"]:  # connected before the watcher's first look
-            msg = await shell.next_json("windowVisibility")
-        assert msg == {"type": "windowVisibility", "visible": False}
+        # Connected before or after the watcher's first look: `True` may come first, and `False`
+        # may come twice (a broadcast and greet's own message).
+        assert await visibility_until(shell, False) == {
+            "type": "windowVisibility",
+            "visible": False,
+        }
         hypr.clients = [hyprland_client(1, pid=os.getpid())]
         await hypr.emit("workspacev2>>1,1")
-        assert await shell.next_json("windowVisibility") == {
+        assert await visibility_until(shell, True) == {"type": "windowVisibility", "visible": True}
+    finally:
+        await h.stop()
+        await hypr.close()
+        shutil.rmtree(runtime, ignore_errors=True)
+
+
+class GatedHyprland(FakeHyprland):
+    """A Hyprland that answers no request until `gate` is set: the watcher's first look is held."""
+
+    def __init__(self, folder: Path) -> None:
+        super().__init__(folder)
+        self.gate = asyncio.Event()
+
+    async def _request(self, r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+        await self.gate.wait()
+        await super()._request(r, w)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "linux", reason="Hyprland is Linux-only")
+async def test_a_watcher_look_between_hello_and_the_visibility_message_sends_it_twice_harmlessly(
+    tmp_path: Path, window: FakeWindow, http, monkeypatch: pytest.MonkeyPatch
+):
+    """The ordering behind a CI flake: the shell is registered for broadcasts as soon as it
+    connects, so a first look that lands between greet's two sends gives `hello`, `False` (the
+    broadcast), `False` (greet's own). Same state twice: harmless, but a reader that takes the
+    next `windowVisibility` as the answer to a later event must not mistake the second one."""
+    runtime = Path(tempfile.mkdtemp(prefix="xdg"))
+    hypr = GatedHyprland(runtime / "hypr" / "sig")
+    hypr.folder.mkdir(parents=True)
+    hypr.clients = [hyprland_client(21, pid=os.getpid())]
+    await hypr.start()
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    monkeypatch.setenv("HYPRLAND_INSTANCE_SIGNATURE", "sig")
+    monkeypatch.delenv("TIDALVIZ_HYPRLAND_VISIBILITY", raising=False)
+    h = Host(
+        root=tmp_path / "home",
+        builtin_dirs=BUILTINS,
+        source_id="synthetic:demo",
+        window=window,
+        watch_hyprland=True,
+    )
+    await h.start()
+    control = h.servers.control
+    real_send, real_broadcast = control.send_json, control.broadcast_json
+    broadcast_done = asyncio.Event()
+
+    async def broadcast(msg: dict[str, Any]) -> None:
+        await real_broadcast(msg)
+        if msg["type"] == "windowVisibility":
+            broadcast_done.set()
+
+    async def send(client: Any, msg: dict[str, Any]) -> None:
+        await real_send(client, msg)
+        if msg["type"] == "hello":  # now let the first look happen, and wait for its broadcast
+            hypr.gate.set()
+            async with asyncio.timeout(3):
+                await broadcast_done.wait()
+
+    control.broadcast_json = broadcast  # type: ignore[method-assign]
+    control.send_json = send  # type: ignore[method-assign]
+    try:
+        shell = await connect(h, http)
+        await shell.next_json("hello")
+        assert await visibility_until(shell, False) == {
             "type": "windowVisibility",
-            "visible": True,
+            "visible": False,
         }
+        hypr.clients = [hyprland_client(1, pid=os.getpid())]
+        await hypr.emit("workspacev2>>1,1")
+        assert await visibility_until(shell, True) == {"type": "windowVisibility", "visible": True}
     finally:
         await h.stop()
         await hypr.close()
