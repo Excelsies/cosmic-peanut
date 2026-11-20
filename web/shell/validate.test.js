@@ -110,7 +110,7 @@ describe("parseHostMessage", () => {
     const ok = [
       { type: "reload", key: "k" },
       { type: "manifestError", repo: "r", errors: [{ path: "/a", message: "bad" }] },
-      { type: "sources", sources: [{ id: "app:12", name: "Music" }], active: "app:12" },
+      { type: "sources", sources: [{ id: "app:12", name: "Music" }], active: "app:12", transport: false },
       { type: "silence", silent: true, seconds: 4 },
       { type: "stats", hostCpu: 3, rssMb: 90, analysisMsP50: 0.3, captureToSendMsP95: 4, droppedFrames: 0, latencyMsP95: 20 },
       { type: "installPrompt", id: "i1", url: "https://x/y", commit: "abc", visualizers: [{ id: "v", name: "V" }] },

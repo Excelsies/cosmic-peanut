@@ -3,6 +3,60 @@
 Newest first within each milestone. Numbers are from the dev machine unless stated
 (Apple M4 Pro, macOS 26.6) — the PRD's reference machine is an M1 MacBook Air.
 
+## Local-file player (2026-11-19)
+
+The `player` source ("Files") plays local audio files and feeds the analysis the samples it sends
+to the output. Contracts: `docs/protocols.md` §2 (`Transport`, `QueueControl`, `PlayerSource`) and
+§4 (`transport`, `playerOpen`, `playerSelect`, `playerClear`, `nowPlaying`, `queue`). Measured in a
+spike (`.tmp/player-spike`, throwaway) before this was written:
+
+- **Engine:** GStreamer in-process through PyGObject. `playbin3` → `tee` → output sink and an
+  `appsink sync=true` branch (48 kHz stereo F32, `audiobuffersplit` to 512-frame blocks). The
+  appsink blocks and the sink's audio are the same stream, so there is no capture latency to
+  align: the click grid of a file arrived within 0.1 ms of itself as onsets (`test_clicks_in_a_file…`).
+- **`pulsesink`, not `pipewiresink`:** the latter played a track at the wrong speed after a
+  sample-rate change and dropped audio at start. What `pulsesink` does when its output goes
+  away is measured below. The spike also noted a repeating error (~130 a second) after a sink loss;
+  its conditions were not recorded and were not reproduced (one error in 3 s here), so no rate is
+  claimed. The player stops the pipeline on the first output error either way.
+- **Losing the output (measured 2026-11-19, digital silence on a temporary null sink, pipewire-pulse
+  on PipeWire):** a plain `pulsesink device=<sink>` whose sink is unloaded is *moved* by PipeWire to
+  the default output and keeps playing, with no bus message at all (also with only
+  `media.role=Music`). A bus ERROR (`pa_stream_writable_size() failed: Entity killed`, once, not
+  repeating) arrives only when the stream carries `node.dont-reconnect=true` in `stream-properties`
+  (with or without `node.dont-fallback`), once, not repeating in the 3 s watched. `pactl kill-sink-input` is refused by pipewire-pulse, so
+  killing the stream that way could not be tried. The player sets no stream properties, so it follows the
+  default output (the intended behaviour for a player); the `OUTPUT_FAILED` path is for errors the
+  output does report (server gone, a pinned stream) and for a stream that stops delivering audio
+  (5 s stall).
+- **One worker thread, no GLib loop, no signal handlers:** `set_state(NULL)` from a streaming-thread
+  handler deadlocked. The worker pulls with `try_pull_sample` and polls the bus; `GstApp` must be
+  imported or the appsink has no methods.
+- **Silence blocks** while nothing plays: a source that goes quiet freezes the visuals on the last
+  loud frame (nothing tells the pipeline), a block of zeros every hop reports silence like a
+  captured app that paused.
+- **Preflight:** `Discoverer` OK with an audio stream. `playbin3` posts no error for `.db`/`.exe`
+  (stuck in READY→PLAYING) and plays a `.jpg` with no audio and no EOS, hence the preflight plus a
+  5 s first-block timeout. Walking a folder by extension first saves ~100 ms per cover image.
+- **Tags** come from the discoverer, not bus TAG messages (incremental; one leaked the previous
+  track's album). 1,106 real files: 30 s on one thread, 4–8 s on 4–8; the player uses four.
+  Durations are the discoverer's: off by up to ±10 s for VBR MP3 without a seek table, so the end
+  of a track is the EOS. Seeks are accurate (key-unit seeks landed 0.6–1.4 s early in WMA).
+- **Per block:** PyGObject copies ~4 KB into a `bytes` per pulled block, so the path allocates
+  (5.3 KB peak per block here, `tracemalloc`); `GstBackend.pull` is the one place to swap for a
+  pipe reader (`fdsink` → pipe → `readinto`, 64 B per block in the spike).
+- **Decision (2026-11-19): the player's sample hand-off is an exception to "hot paths allocate
+  nothing per frame".** The copy is transient: retained memory levels off (~10 KB over 14,000
+  blocks, the worker-loop test pins the slope). A 15-minute run of 24 tracks on a null sink (host
+  on the dev Linux machine, load average 7–14 from other work) had 0 gaps over 100 ms in 84,553
+  blocks, 23 over 50 ms, 78 ms at most, at 7.2% of one core with no RSS growth. Switch to the pipe
+  reader if a run shows pauses, or before offering the player upstream.
+- **Not done:** gapless (~35 ms gap on a plain state change), shuffle, repeat, volume, cover art,
+  MPRIS and media keys.
+- **Checked on a real sink** (`pulsesink:tidalviz_test`, a temporary null sink, default sink
+  verified unchanged): the stream linked to the null sink only, position tracked wall time
+  (1.97 s after 2.0 s), the click grid played.
+
 ## Beat tracking: Ballroom harness and a new tracker (2026-10-22)
 
 `uv run python -m tools.beat_eval` streams all 698 Ballroom clips hop by hop through the real

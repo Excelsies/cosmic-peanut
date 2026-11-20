@@ -5,6 +5,7 @@ Thin platform code, verified by running the app and the e2e suite rather than un
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportMissingTypeStubs=false, reportAttributeAccessIssue=false, reportPrivateImportUsage=false
 
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -108,8 +109,23 @@ class PyWebviewWindow:
         """Unknown (0): WKWebView paces rAF to the display itself, so the shell assumes 60 Hz."""
         return 0.0
 
-    def pick_folder(self) -> str | None:
+    def pick_folder(self, directory: str | None = None) -> str | None:
         import webview  # type: ignore[import-not-found]
 
-        result = self.win.create_file_dialog(webview.FileDialog.FOLDER)
+        result = self.win.create_file_dialog(webview.FileDialog.FOLDER, directory=directory or "")
         return str(result[0]) if result else None
+
+    def pick_audio_files(self, directory: str | None, extensions: Sequence[str]) -> list[str]:
+        """The open-files dialog, several at once, filtered to ``extensions`` (".mp3", ...).
+
+        GTK's filter patterns are case-sensitive, so each extension is listed in both cases."""
+        import webview  # type: ignore[import-not-found]
+
+        patterns = ";".join(f"*{e};*{e.upper()}" for e in extensions)
+        result = self.win.create_file_dialog(
+            webview.FileDialog.OPEN,
+            directory=directory or "",
+            allow_multiple=True,
+            file_types=(f"Audio files ({patterns})",),
+        )
+        return [str(p) for p in result] if result else []

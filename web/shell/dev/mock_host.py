@@ -8,6 +8,10 @@ frames at ~94 Hz.
 
 Then open the printed URL. Test hooks (mock only): GET /_log returns every message the shell
 sent; POST /_send broadcasts a JSON host message to the shell.
+
+The "Files" source is a pretend file player (mock_player.py): pick it in the source menu to get
+the transport row, the queue and a clock. `--tracks N` sizes its queue (up to 2000), `--source
+player` starts on it. Nothing plays; there is no audio.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from aiohttp import WSMsgType, web
+from mock_player import MockPlayer, sample_tracks
 
 from tidalviz.frame import new_frame
 from tidalviz.transport.frame import encode
@@ -87,7 +92,9 @@ def registry(plugin_origin: str) -> list[dict[str, Any]]:
 
 
 class MockHost:
-    def __init__(self, shell_port: int, plugin_port: int) -> None:
+    def __init__(
+        self, shell_port: int, plugin_port: int, tracks: int = 12, source: str = "system"
+    ) -> None:
         self.shell_port = shell_port
         self.plugin_port = plugin_port
         self.token = secrets.token_urlsafe(8)
@@ -95,8 +102,21 @@ class MockHost:
         self.clients: set[web.WebSocketResponse] = set()
         self.settings: dict[str, Any] = {"quality": "auto", "reduceFlashing": True}
         self.active: str | None = None
-        self.sources = [{"id": "system", "name": "All audio"}, {"id": "app:501", "name": "Music"}]
-        self.active_source = "system"
+        self.sources = [
+            {"id": "system", "name": "All audio"},
+            {"id": "app:501", "name": "Music"},
+            {"id": "player", "name": "Files"},
+        ]
+        self.active_source = source
+        self.player = MockPlayer(sample_tracks(tracks))
+        self.player_sig: tuple[Any, ...] | None = None
+        self.player_revision: int | None = None
+        self.player_task: asyncio.Task[None] | None = None
+        # The pretend native dialog: open for `dialog_s`, then picks files (or finds no audio).
+        self.dialog_s = 0.05
+        self.dialog_finds_audio = True
+        self.dialog_open = False
+        self.dialog_tasks: set[asyncio.Task[None]] = set()
         self.visualizers: list[dict[str, Any]] = []
         self.runners: list[web.AppRunner] = []
         self.frame_task: asyncio.Task[None] | None = None
@@ -139,7 +159,12 @@ class MockHost:
             {"token": self.token, "pluginOrigin": self.plugin_origin, "dev": True}
         )
 
+    @property
+    def transport(self) -> bool:
+        return self.active_source == "player"
+
     def hello(self) -> dict[str, Any]:
+        self.player_sig, self.player_revision = self.player.signature(), self.player.revision
         return {
             "type": "hello",
             "version": 1,
@@ -154,6 +179,9 @@ class MockHost:
             "activeSource": self.active_source,
             "active": self.active,
             "dev": True,
+            "transport": self.transport,
+            "nowPlaying": self.player.now_playing() if self.transport else None,
+            "queue": self.player.queue_fields() if self.transport else None,
         }  # fmt: skip
 
     async def broadcast(self, msg: dict[str, Any]) -> None:
@@ -191,17 +219,98 @@ class MockHost:
         elif t == "setSource":
             self.active_source = m["id"]
             await self.broadcast(
-                {"type": "sources", "sources": self.sources, "active": self.active_source}
+                {
+                    "type": "sources",
+                    "sources": self.sources,
+                    "active": self.active_source,
+                    "transport": self.transport,
+                }
             )
+            await self.announce(force=True)
         elif t == "install":
             await self.broadcast({"type": "installPrompt", "id": "i1", "url": m["url"], "commit": "feedface1234",
                                   "visualizers": [{"id": "new", "name": "New Thing"}]})  # fmt: skip
         elif t == "installConfirm":
             await self.broadcast({"type": "installResult", "id": m["id"], "ok": bool(m["accept"])})
+        elif t in ("transport", "playerOpen", "playerSelect", "playerClear"):
+            await self.on_player_message(m)
         elif t == "pluginError":
             await self.broadcast(
                 {"type": "status", "level": "error", "text": f"{m['key']}: {m['message']}"}
             )
+
+    # ---- the pretend file player (mock_player.py) ----------------------------------------------
+    async def on_player_message(self, m: dict[str, Any]) -> None:
+        if not self.transport:
+            return  # like the host: ignored unless the active source has a transport
+        match m["type"]:
+            case "transport":
+                self.player.transport(m["action"], m.get("value"), m.get("serial"))
+                await self.send_skip_status()
+                # One `nowPlaying` follows every seek, even one that changed nothing or a paused one.
+                await self.announce(now_playing=m["action"] == "seek")
+                return
+            case "playerOpen":
+                if not self.dialog_open:  # a second open while the dialog is up is ignored
+                    self.dialog_open = True
+                    task = asyncio.create_task(self.dialog(m["kind"], m["replace"]))
+                    self.dialog_tasks.add(task)
+                    task.add_done_callback(self.dialog_tasks.discard)
+                return
+            case "playerSelect":
+                text = self.player.select(m["index"])
+                if text:
+                    await self.broadcast({"type": "status", "level": "warn", "text": text})
+            case "playerClear":
+                self.player.clear()
+        await self.announce()
+
+    async def send_skip_status(self) -> None:
+        if text := self.player.take_status():
+            await self.broadcast({"type": "status", "level": "warn", "text": text})
+
+    async def dialog(self, kind: str, replace: bool) -> None:
+        try:
+            await asyncio.sleep(self.dialog_s)
+            if not self.dialog_finds_audio:
+                text = "No audio files found"
+                await self.broadcast({"type": "status", "level": "info", "text": text})
+                return
+            self.player.open(kind, replace)
+            await self.announce()
+        finally:
+            self.dialog_open = False
+
+    async def announce(self, force: bool = False, now_playing: bool = False) -> None:
+        """Send what changed, as the real host does: `nowPlaying` unless only the position moved
+        (the position alone changes every second by itself; a seek asks for one explicitly),
+        `queue` when its revision moved."""
+        if not self.transport:
+            return
+        sig = self.player.signature()
+        if force or now_playing or sig != self.player_sig:
+            self.player_sig = sig
+            await self.broadcast({"type": "nowPlaying", **self.player.now_playing()})
+        if force or self.player.revision != self.player_revision:
+            self.player_revision = self.player.revision
+            await self.broadcast({"type": "queue", **self.player.queue_fields()})
+
+    async def player_loop(self) -> None:
+        """Once a second while playing a position correction; a few tags found every 250 ms."""
+        n = 0
+        while True:
+            await asyncio.sleep(0.25)
+            n += 1
+            if not self.transport:
+                continue
+            moved = self.player.end_of_track()
+            await self.send_skip_status()
+            if self.player.reveal():
+                await self.announce()
+            if moved:
+                await self.announce()
+            elif n % 4 == 0 and self.player.playing:
+                await self.broadcast({"type": "nowPlaying", **self.player.now_playing()})
 
     async def get_log(self, _req: web.Request) -> web.StreamResponse:
         return web.json_response(self.received)
@@ -289,18 +398,20 @@ class MockHost:
         self.runners = [prunner, srunner]
         self.visualizers = registry(self.plugin_origin)
         self.frame_task = asyncio.create_task(self.frames())
+        self.player_task = asyncio.create_task(self.player_loop())
 
     async def stop(self) -> None:
-        if self.frame_task:
-            self.frame_task.cancel()
+        for task in (self.frame_task, self.player_task, *self.dialog_tasks):
+            if task:
+                task.cancel()
         for ws in list(self.clients):
             await ws.close()
         for r in self.runners:
             await r.cleanup()
 
 
-async def _main(port: int, plugin_port: int) -> None:
-    host = MockHost(port, plugin_port)
+async def _main(port: int, plugin_port: int, tracks: int, source: str) -> None:
+    host = MockHost(port, plugin_port, tracks, source)
     await host.start()
     print(f"Mock host: {host.url}  (plugins on {host.plugin_origin})", flush=True)
     try:
@@ -313,6 +424,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=0)
     ap.add_argument("--plugin-port", type=int, default=0)
+    ap.add_argument(
+        "--tracks", type=int, default=12, help="entries in the pretend file queue (max 2000)"
+    )
+    ap.add_argument("--source", default="system", choices=["system", "player"])
     a = ap.parse_args()
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_main(a.port, a.plugin_port))
+        asyncio.run(_main(a.port, a.plugin_port, min(a.tracks, 2000), a.source))

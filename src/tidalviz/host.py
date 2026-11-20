@@ -27,8 +27,11 @@ from tidalviz.capture import (
     SyntheticSource,
     app_source,
     list_audio_apps,
+    player_available,
+    player_source,
     system_source,
 )
+from tidalviz.media import MediaBridge
 from tidalviz.pipeline import AudioPipeline
 from tidalviz.plugins import DevFolderWatcher, ManifestError, PluginRegistry
 from tidalviz.plugins.git import GitFetcher
@@ -44,6 +47,7 @@ log = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = 1
 CLICK_INTERVAL_S = 2.0
+MAX_NOTICES = 20  # statuses kept for a shell that has not connected yet
 RECOVER_INTERVAL_S = 60.0  # a web view that keeps failing after a reload must not loop
 STATS_INTERVAL_S = 1.0
 # System Settings → Privacy & Security → Screen & System Audio Recording (process taps).
@@ -73,7 +77,8 @@ class WindowControl(Protocol):
     def quit(self) -> None: ...
     def click_plugin(self) -> None: ...
     def recover_webview(self) -> None: ...
-    def pick_folder(self) -> str | None: ...
+    def pick_folder(self, directory: str | None = None) -> str | None: ...
+    def pick_audio_files(self, directory: str | None, extensions: Sequence[str]) -> list[str]: ...
     def refresh_hz(self) -> float: ...  # the window's monitor, 0 = unknown
 
 
@@ -81,8 +86,15 @@ def open_url(url: str) -> None:
     subprocess.run(["/usr/bin/open", url], check=False)
 
 
-def make_source(source_id: str, apps: Sequence[AudioApp] | None = None) -> AudioSource:
-    """`system`, `app:<pid>` or `synthetic:<kind>` → a capture source. ``apps`` reuses a listing."""
+def make_source(
+    source_id: str, apps: Sequence[AudioApp] | None = None, *, root: Path | None = None
+) -> AudioSource:
+    """`system`, `app:<pid>`, `synthetic:<kind>` or `player` → a source. ``apps`` reuses a
+    listing; ``root`` (the data dir) is where the player keeps its queue."""
+    if source_id == "player":
+        if root is None or not player_available():
+            raise ValueError("the file player is not available here")
+        return player_source(root)
     if source_id == "system":
         return system_source()
     if source_id.startswith("app:"):
@@ -123,13 +135,20 @@ class Host:
     ) -> None:
         root.mkdir(parents=True, exist_ok=True)
         self.settings = Settings(root / "settings.json")
-        if source_id is not None:
-            self.settings.data["source"] = source_id  # this launch only; not persisted
+        # The source of this launch: `--source`, files on the command line, or the saved choice.
+        # Kept out of `settings.data`, which any later settings change saves in full.
+        self._active_source: str = (
+            source_id if source_id is not None else self.settings.data["source"]
+        )
+        self._launch_override = source_id is not None  # --source or files: never saved
+        self._closing = False
         self.registry = PluginRegistry(root, builtin_dirs, fetcher=fetcher)
         self.bench = BenchRecorder(bench_key) if bench_key is not None else None
         if bench_key is not None:
             self.settings.data["active"] = bench_key  # this launch only; not persisted
         self.window = window
+        self._root = root
+        self.media = MediaBridge(self._send_media, window)
         self._open_url = open_url
         self.dev = dev
         self.servers = HostServers(
@@ -173,7 +192,9 @@ class Host:
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
         await self.servers.start()
+        await asyncio.to_thread(player_available)  # imports GStreamer once, off the loop
         self.pipeline = AudioPipeline(self._initial_source(), self._publish)
+        self.media.bind(self.pipeline.source)
         self.pipeline.pause()  # resumed when a shell connects
         self.pipeline.start()
         for key, folder in self.registry.dev_folders().items():
@@ -190,13 +211,15 @@ class Host:
 
     def _initial_source(self) -> AudioSource:
         """The saved source, or system audio if it is gone (an app:<pid> whose app quit)."""
-        source_id = self.settings.data["source"]
+        source_id = self._active_source
         try:
-            return make_source(source_id)
+            return make_source(source_id, root=self._root)
         except ValueError as e:
             # A saved `app:<pid>` is usually gone after a restart; don't refuse to launch.
             log.warning("saved source unavailable (%s); using system audio", e)
-        self.settings.data["source"] = "system"  # this launch only, like --source
+        self._active_source = "system"
+        if not self._launch_override:  # the saved choice is stale: heal it, so the notice is once
+            self.settings.update({"source": "system"})
         self._notices.append(
             {
                 "type": "status",
@@ -207,6 +230,7 @@ class Host:
         return make_source("system")
 
     async def stop(self) -> None:
+        self._closing = True  # nothing may create a source on a pipeline that is stopping
         if self._hyprland is not None:
             await self._hyprland.stop()
         if self._stats_task is not None:
@@ -214,6 +238,7 @@ class Host:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._stats_task
         await asyncio.to_thread(self.watcher.stop)
+        self.media.bind(None)
         if self.pipeline is not None:
             await asyncio.to_thread(self.pipeline.stop)
         await self.servers.stop()
@@ -297,6 +322,8 @@ class Host:
         out = [{"id": "system", "name": "All audio"}]
         out += [{"id": a.id, "name": a.name} for a in apps]
         out.append({"id": "synthetic:demo", "name": "Demo (synthetic)"})
+        if player_available():
+            out.append({"id": "player", "name": "Files"})
         return out
 
     def hello(self, apps: Sequence[AudioApp]) -> dict[str, Any]:
@@ -309,10 +336,11 @@ class Host:
             "repos": self.registry.repos(),
             "settings": {k: v for k, v in s.items() if k not in ("params", "window")},
             "sources": self.sources(apps),
-            "activeSource": s["source"],
+            "activeSource": self._active_source,
             "active": s["active"],
             "dev": self.dev,
             "refreshHz": self._refresh_hz,
+            **self.media.hello_fields(),
         }
 
     # --- control channel ------------------------------------------------------------------
@@ -408,6 +436,8 @@ class Host:
                 self._spawn(self._add_folder(msg.get("path")))
             case "window":
                 self._window_action(msg["action"])
+            case "transport" | "playerOpen" | "playerSelect" | "playerClear":
+                self.media.handle(msg)
             case _:
                 pass
 
@@ -446,25 +476,37 @@ class Host:
             }
         )
 
-    async def _set_source(self, source_id: str) -> None:
+    async def _set_source(self, source_id: str, *, persist: bool = True) -> bool:
+        """Switch the active source (True when it was). Only the user's own choice in the shell
+        is saved (``persist``); a switch made for files handed to the host is for this run only."""
         self._source_request += 1
         request = self._source_request
         apps = await asyncio.to_thread(audio_apps)  # one listing for the source and the broadcast
-        if request != self._source_request:
-            return
+        if request != self._source_request or self._closing:
+            return False
         try:
-            source = make_source(source_id, apps)
+            source = make_source(source_id, apps, root=self._root)
         except ValueError:
             await self.servers.control.broadcast_json(
                 {"type": "status", "level": "error", "text": f"Unknown audio source: {source_id}"}
             )
-            return
+            return False
         if self.pipeline is not None:
             self.pipeline.switch_source(source)
-        self.settings.update({"source": source_id})
+        self.media.bind(source)
+        self._active_source = source_id
+        if persist:
+            self.settings.update({"source": source_id})
         await self.servers.control.broadcast_json(
-            {"type": "sources", "sources": self.sources(apps), "active": source_id}
+            {
+                "type": "sources",
+                "sources": self.sources(apps),
+                "active": source_id,
+                "transport": self.media.supported,
+            }
         )
+        await self.media.announce()
+        return True
 
     def _onset_seen(self, index: int) -> None:
         now = time.monotonic()
@@ -491,6 +533,7 @@ class Host:
         while True:
             await asyncio.sleep(STATS_INTERVAL_S)
             if self.servers.control.client_count:
+                await self.media.tick()
                 await self._follow_refresh_rate()
                 stats = self.stats()
                 if self.bench is not None:
@@ -505,6 +548,48 @@ class Host:
             await self.servers.control.broadcast_json({"type": "display", "refreshHz": hz})
 
     # --- installs (blocking registry work runs in a thread) --------------------------------
+
+    async def _send_media(self, msg: dict[str, Any]) -> None:
+        """Player messages. A status with no shell connected (the files given on the command line
+        are opened before the window exists) waits for the next shell instead of being lost."""
+        if msg["type"] == "status" and not self.servers.control.client_count:
+            if len(self._notices) < MAX_NOTICES:
+                self._notices.append(msg)
+            return
+        await self.servers.control.broadcast_json(msg)
+
+    async def open_paths(self, paths: Sequence[Path]) -> None:
+        """Play these files (and folders) now: the queue is replaced. Switches to the player when
+        another source is active, as a `setSource` from the shell would, but for this run only
+        (the saved source is the user's own choice). Called by the first launch for its
+        command-line paths and by the instance listener for a second launch's."""
+        failed = {"type": "status", "level": "error", "text": "Could not open the chosen files"}
+        try:
+            if self._closing:
+                return
+            if not player_available():
+                await self._send_media(
+                    {
+                        "type": "status",
+                        "level": "warn",
+                        "text": "Cannot open files: the file player needs GStreamer",
+                    }
+                )
+                return
+            if await self.media.open_files(paths, replace=True):
+                return
+            if not await self._set_source("player", persist=False):
+                if not self._closing:  # superseded by the user's own choice, or refused
+                    await self._send_media(failed)
+                return
+            if self._closing:
+                return
+            if not await self.media.open_files(paths, replace=True) and not self._closing:
+                await self._send_media(failed)
+        except Exception:
+            log.exception("opening handed-over files failed")
+            if not self._closing:
+                await self._send_media(failed)
 
     async def _send_all(self, msg: dict[str, Any]) -> None:
         await self.servers.control.broadcast_json(msg)

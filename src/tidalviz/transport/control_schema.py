@@ -87,10 +87,27 @@ _SCHEMAS: dict[str, dict[str, tuple[Check, bool]]] = {
     "enable": {"key": (_str, True)},
     "openPermissions": {},
     "visibility": {"visible": (_bool, True)},
+    "transport": {
+        "action": (_one_of("play", "pause", "toggle", "next", "previous", "seek"), True),
+        "value": (_num, False),
+        "serial": (_count, False),
+    },
+    "playerOpen": {"kind": (_one_of("files", "folder"), True), "replace": (_bool, True)},
+    "playerSelect": {"index": (_count, True)},
+    "playerClear": {},
     "window": {"action": (_one_of("fullscreen", "floatOnTop", "borderless", "quit"), True)},
 }
 
 SHELL_MESSAGE_TYPES = frozenset(_SCHEMAS)
+
+
+def _check_transport(msg: Mapping[str, Any]) -> None:
+    if msg["action"] == "seek" and not (_num(msg.get("value")) and msg["value"] >= 0):
+        raise ShellMessageError("transport: seek needs a 'value' of seconds, 0 or more")
+
+
+# Checks across fields, run after the per-field ones passed.
+_RULES: dict[str, Callable[[Mapping[str, Any]], None]] = {"transport": _check_transport}
 
 
 def validate_shell_message(msg: Mapping[str, Any]) -> bool:
@@ -112,4 +129,7 @@ def validate_shell_message(msg: Mapping[str, Any]) -> bool:
             continue
         if not check(msg[name]):
             raise ShellMessageError(f"{kind}: bad value for field {name!r}")
+    rule = _RULES.get(kind)
+    if rule is not None:
+        rule(msg)
     return True

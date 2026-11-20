@@ -413,7 +413,8 @@ async def test_unknown_source_is_rejected_with_a_status(host: Host, http):
     await shell.send({"type": "setSource", "id": "synthetic:nope"})
     status = await shell.next_json("status")
     assert status["level"] == "error"
-    assert host.settings.data["source"] == "synthetic:demo"
+    assert host._active_source == "synthetic:demo"  # the launch's source; nothing was saved
+    assert host.settings.data["source"] == "system"
 
 
 def test_make_source_rejects_an_app_that_is_not_playing(monkeypatch: pytest.MonkeyPatch):
@@ -436,7 +437,7 @@ async def test_start_falls_back_to_system_audio_when_the_saved_app_is_gone(
     h = Host(root=tmp_path / "home", builtin_dirs=BUILTINS, source_id="app:424242", window=window)
     await h.start()
     try:
-        assert h.settings.data["source"] == "system"
+        assert h._active_source == "system"  # this launch only
         assert h.pipeline is not None
     finally:
         await h.stop()
@@ -462,7 +463,7 @@ async def test_settings_persist_only_shell_owned_keys(host: Host, http):
     )
     await asyncio.sleep(0.1)
     assert host.settings.data["quality"] == "battery" and host.settings.data["hudVisible"]
-    assert host.settings.data["source"] == "synthetic:demo"
+    assert host.settings.data["source"] == "system"  # `source` is not a shell setting
 
 
 @pytest.mark.asyncio
@@ -927,3 +928,53 @@ async def test_a_watcher_look_between_hello_and_the_visibility_message_sends_it_
         await h.stop()
         await hypr.close()
         shutil.rmtree(runtime, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_a_stale_saved_app_source_is_replaced_in_settings_so_the_notice_is_not_repeated(
+    tmp_path: Path, window: FakeWindow, http, monkeypatch: pytest.MonkeyPatch
+):
+    from tidalviz import host as host_module
+    from tidalviz.capture import SyntheticSource
+    from tidalviz.settings import Settings
+
+    root = tmp_path / "home"
+    Settings(root / "settings.json").update({"source": "app:999999"})
+    monkeypatch.setattr(host_module, "list_audio_apps", lambda: [])
+    monkeypatch.setattr(host_module, "system_source", lambda: SyntheticSource("silence"))
+    first = Host(root=root, builtin_dirs=BUILTINS, window=window)
+    await first.start()
+    try:
+        shell = await connect(first, http)
+        await shell.next_json("hello")
+        assert "app:999999" in (await shell.next_json("status"))["text"]  # the notice, this once
+    finally:
+        await first.stop()
+    assert Settings(root / "settings.json").data["source"] == "system"  # healed on disk
+    second = Host(root=root, builtin_dirs=BUILTINS, window=window)
+    await second.start()
+    try:
+        assert second._notices == []
+    finally:
+        await second.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_launch_override_that_is_gone_never_touches_the_saved_source(
+    tmp_path: Path, window: FakeWindow, monkeypatch: pytest.MonkeyPatch
+):
+    from tidalviz import host as host_module
+    from tidalviz.capture import SyntheticSource
+    from tidalviz.settings import Settings
+
+    root = tmp_path / "home"
+    Settings(root / "settings.json").update({"source": "synthetic:demo"})
+    monkeypatch.setattr(host_module, "list_audio_apps", lambda: [])
+    monkeypatch.setattr(host_module, "system_source", lambda: SyntheticSource("silence"))
+    h = Host(root=root, builtin_dirs=BUILTINS, source_id="app:424242", window=window)  # --source
+    await h.start()
+    try:
+        h.settings.update({"quality": "high"})
+    finally:
+        await h.stop()
+    assert Settings(root / "settings.json").data["source"] == "synthetic:demo"

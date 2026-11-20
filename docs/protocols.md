@@ -79,9 +79,26 @@ OnSamples = Callable[[NDArray[float32], float], None]
 # Implementations: CatapSystemSource, CatapAppSource(name)            (macOS)
 #                  PipeWireSystemSource, PipeWireAppSource(app)       (Linux)
 #                  FileSource(wav), SyntheticSource(kind)             (everywhere)
+#                  PlayerSource(queue file)  -- id `player`, "Files"  (Linux with the `gtk` extra)
 # `tidalviz.capture` exports the platform's pair as system_source() / app_source(app) and
 # list_audio_apps() -> AudioApp(id "app:<pid>", name, pid); the host never names a backend.
 # Failures: sources expose `failed: threading.Event`; the pipeline restarts them with backoff.
+
+# tidalviz/capture/transport.py — optional capabilities of a source that knows what is playing.
+# The host finds them with isinstance() and never names the implementation.
+@runtime_checkable
+class Transport(Protocol):
+    def now_playing(self) -> NowPlaying: ...         # artist, album, title, duration|None, position,
+                                                      # playing, index|None, count
+    def bind(self, on_change: Callable[[], None],     # any thread; carries no data: pull afterwards
+             on_status: Callable[[str, str], None]) -> None: ...   # (level, text)
+    def play(self); pause(self); toggle(self); next(self); previous(self)
+    def seek(self, seconds: float); select(self, index: int)       # select: ValueError if no such entry
+@runtime_checkable
+class QueueControl(Protocol):                         # a Transport with a list the user can fill
+    extensions: tuple[str, ...]; last_folder: str | None
+    def queue(self) -> QueueSnapshot: ...            # revision + entries (title, artist, album, duration|None, playable)
+    def open(self, paths: Sequence[Path], *, replace: bool); clear(self)   # folders are searched recursively
 
 # tidalviz/analysis
 class FeatureExtractor(Protocol):
@@ -98,13 +115,31 @@ class FrameHub:                                      # lives on the asyncio loop
     def publish(self, data: bytes) -> bool           # keeps only the newest; never queues
 ```
 
+`PlayerSource` (`tidalviz/player/`; GStreamer is imported only by `player/engine.py`, so the app
+imports and runs without it and `player` is simply not offered) plays local files through
+`playbin3` → `tee` → (output sink, and `audioconvert ! audioresample ! F32LE/48000/2 !
+audiobuffersplit(512 frames) ! appsink`), so its format is always 48 kHz stereo and `on_samples`
+sees the samples the sink plays, in hop-sized blocks. One worker thread pulls blocks, polls the
+GStreamer bus and runs the shell's commands; `on_samples` is called only from it, and `stop()` may
+be called from inside it. `t` is `time.monotonic()` taken when the block is delivered. While
+paused, stopped, between tracks or with an empty queue it delivers a block of zeros every 512
+frames, so analysis reports silence instead of freezing on the last loud frame. A file that cannot
+be played (missing, corrupt, not audio) is a per-track outcome: it is marked unplayable, reported
+as a `status`, and skipped; `failed` is set only when the engine breaks (the output reports an
+error, or the output delivers no audio for 5 s while playing), after which the pipeline restarts the source, stopped at its current track until the user presses play. The output is
+`pulsesink` on the default device, or `TIDALVIZ_PLAYER_SINK=<element>[:<device>]` with `<element>`
+`pulsesink` or `fakesink` (tests; `pulsesink:<sink name>` pins a null sink for manual tests). Losing the output device is not an error by itself: PipeWire moves the stream to the default output and playback continues there, so a pinned `pulsesink:<sink name>` that disappears ends up on the default output.
+The queue (file paths and current index, not the position) and the folder the open dialog last
+used are kept in `player.json` in the data dir.
+
 Threads: catap worker (Linux: the `pw-record` reader thread) → `on_samples` copies into the ring
 and returns. The analysis thread wakes each hop (512 samples), runs the `Analyzer`, encodes, and
 calls `loop.call_soon_threadsafe(hub.publish, data)`. The hub sends the newest frame to each client
 whose previous send has completed and drops the rest. When it replaces a pending onset frame, it
 sets the onset flag on the newer frame (keeping that frame's own `onsetAge`, which already counts
 from the dropped onset) and returns `True`, so the host can time that frame's `onsetSeen`.
-Analysis pauses while no renderer is connected. A silent frame equal to the last published one
+Analysis pauses while no renderer is connected; the source keeps running (a playing file keeps
+playing while the window is hidden or the web view reloads). A silent frame equal to the last published one
 apart from frame index and host time is published only once a second; `resume()`, called on every
 client-count change, sends the next one regardless, so a newly connected client gets a frame.
 While the window is off screen (§4 `windowVisibility`) analysis keeps running, so tempo and gain
@@ -180,12 +215,14 @@ Host → shell:
 
 | type | Fields |
 | --- | --- |
-| `hello` | `version: 1`, `pluginOrigin`, `visualizers: VizInfo[]`, `repos: RepoInfo[]`, `settings`, `sources: SourceInfo[]`, `activeSource`, `active: key \| null`, `dev: bool`, `refreshHz` (the window's monitor; 0 = unknown, e.g. macOS) |
+| `hello` | `version: 1`, `pluginOrigin`, `visualizers: VizInfo[]`, `repos: RepoInfo[]`, `settings`, `sources: SourceInfo[]`, `activeSource`, `active: key \| null`, `dev: bool`, `refreshHz` (the window's monitor; 0 = unknown, e.g. macOS), `transport: bool` (the active source implements the transport capability), `nowPlaying: NowPlaying \| null`, `queue: Queue \| null` (`Queue = { entries: QueueEntry[] }`, `QueueEntry = { title, artist, album, duration: number \| null, playable: bool }`, as in the `queue` message; the state a reloaded shell needs: the fields of the `nowPlaying` / `queue` messages below, without `type`; `null` when the source has no transport / no queue) |
 | `visualizers` | `visualizers: VizInfo[]`, `repos: RepoInfo[]` (registry changed) |
 | `reload` | `key` — dev folder changed; hot-reload if active |
 | `manifestError` | `repo`, `errors: {path, message}[]` |
-| `sources` | `sources: SourceInfo[]`, `active` |
-| `status` | `level: "info"\|"warn"\|"error"`, `text` (plain text), `id?` |
+| `sources` | `sources: SourceInfo[]`, `active`, `transport: bool` (as in `hello`; `nowPlaying` and `queue` follow when true) |
+| `nowPlaying` | `artist`, `album`, `title` (strings, `""` when unknown; at most 200 characters; a missing title is the file name without its extension, never a path), `duration: number \| null` (seconds; the discoverer's value, which can be off by several seconds for VBR MP3 without a seek table, so the end of a track is the host's next `nowPlaying`, never `position >= duration`), `position` (seconds; the seek target until the first block after a seek), `playing: bool` (false: paused or stopped), `index: number \| null` (current queue entry; `null` for an empty queue), `count` (queue length), `serial` (integer ≥ 0, always present, also in `hello.nowPlaying`: increases every time a track is loaded — open/replace, select including of the current track, next, previous, an automatic advance, the end-of-queue rewind, a restart with `previous` on the first track, clear; a change of `serial` alone is a change worth a message), `hostTime` (the host's `time.monotonic()` when `position` was read; for consumers that share the host clock, the shell does not use it). Sent on every change of track, state, tags or queue length and on every `seek` (changes within 250 ms are one message), and once a second while `playing`. The shell extrapolates from its own receipt time: displayed position = `position` + (`performance.now()` − time the message arrived), advancing only while `playing` |
+| `queue` | `entries: {title, artist, album, duration: number \| null, playable: bool}[]` — the whole queue, in order, at most 2000 entries, no paths. Sent when the queue changes and as the background scan fills in tags (batched: at most four messages a second); `playable` turns false once a file proved unplayable (shown, skipped by playback) |
+| `status` | `level: "info"\|"warn"\|"error"`, `text` (plain text, at most 300 characters), `id?`. The player sends one per run of unplayable tracks it passes over, whether the background scan or playback found them out: `Skipped <title>: <reason>` for a run of one (the reason always one of: file not found, cannot be read, not an audio file, could not be decoded, timed out) and `Skipped <N> tracks that could not be played` for a longer run (so a folder of broken files is one message, not thousands), per full queue, per open that found no audio, per rejected seek and per engine failure (`Audio output ...`). No text from GStreamer, the OS or an exception is ever forwarded, and no path: a title is the tag or the file name without its extension |
 | `silence` | `silent: bool`, `seconds` — permission hint after 4 s of silence |
 | `stats` | `hostCpu` (% of one core: the whole host process, WebKit UI work included), `rssMb`, `analysisMsP50`, `captureToSendMsP95`, `droppedFrames`, `latencyMsP95?` (1/s) |
 | `installPrompt` | `id`, `url`, `commit`, `visualizers: {id,name}[]` — trust prompt |
@@ -198,7 +235,7 @@ Host → shell:
 `VizInfo = { key, repo, id, name, description, author, renderer, thumbnailUrl|null, params:
 ParamSpec[], values: ParamValues, disabled: bool, dev: bool, entryUrl, pageUrl }`
 `RepoInfo = { repo, url|null, path|null, commit|null, previous|null, dev: bool, builtin: bool }`
-`SourceInfo = { id: "system" | "app:<pid>" | "synthetic:<kind>" | "file:<name>", name }`
+`SourceInfo = { id: "system" | "app:<pid>" | "synthetic:<kind>" | "file:<name>" | "player", name }` — `player` (name "Files") is listed only where the file player can run (Linux with GStreamer, i.e. the `gtk` extra). Selecting it with an empty queue is valid: it plays silence and the shell should offer to open files
 
 Shell → host:
 
@@ -219,6 +256,10 @@ Shell → host:
 | `update` / `rollback` / `remove` | `repo` |
 | `enable` | `key` — re-enable a disabled visualizer |
 | `window` | `action: "fullscreen" \| "floatOnTop" \| "borderless" \| "quit"` |
+| `transport` | `action: "play" \| "pause" \| "toggle" \| "next" \| "previous" \| "seek"`, `value?` — seconds, required (and ≥ 0) for `seek`; `serial?` — integer ≥ 0, only for `seek`: the `nowPlaying.serial` the shell computed the target for. If it is present and differs from the current serial (another track was loaded since: an automatic advance, the end-of-queue rewind, a `playerSelect`, ...), the host does not seek; it still answers with one `nowPlaying` so the shell resyncs. Without `serial` the seek is always performed. Ignored unless the active source has a transport. `next` on the last track does nothing; `previous` on the first restarts it and plays; `next`, `previous` and `playerSelect` start playing; `seek` on a stopped queue opens the current track paused. Seeks are accurate (never early to a keyframe). Every `seek` (also `previous` restarting the first track) is answered by one `nowPlaying` with the true position, whether it worked, was rejected (`status` "This file cannot be seeked") was dropped as stale (serial) or was coalesced into a newer one (several seeks queued together: only the newest is performed, and the batch gets one `nowPlaying`) |
+| `playerOpen` | `kind: "files" \| "folder"`, `replace: bool` — the host opens its native dialog (starting in the last folder used; the shell never sends or sees a path) and queues the choice; a folder is searched recursively for audio files (extension allowlist) and sorted naturally by path. `replace` empties the queue first and starts playing the first track; appending to a queue that was empty starts it too, appending to a non-empty one leaves playback alone. A cancelled dialog does nothing, and so does a choice with no audio files in it: the queue is left alone and an info `status` "No audio files found" is sent. A second `playerOpen` while a dialog is open is ignored. A folder walk visits entries in natural path order (unreadable or dangling entries are skipped) and stops after 6000 audio files or 200,000 directory entries, audio or not, shared by everything chosen; either way a cut keeps the first files in that order, except inside one directory with more entries than the budget has left, where the file system decides which entries are read; a `status` says so ("The folder is too big to search completely: found N audio files before stopping" (N counts what the walk found; the queue may keep fewer, which its own status reports), or, when none was found before the cap, "No audio files found in the part searched (the folder is very large)", a warn). The queue keeps its first 2000. Ignored unless the source has a queue |
+| `playerSelect` | `index` — play that queue entry (a stale index is ignored; an entry already known unplayable gets a `status` instead) |
+| `playerClear` | — stop and empty the queue |
 | `openPermissions` | — user pressed the permission-help button; on macOS the host opens System Settings at the audio-capture privacy pane (Linux capture needs no permission: ignored) |
 
 ## 5. Shell ⇄ plugin iframe
@@ -253,3 +294,39 @@ SDK → shell (port):
 
 Every message is untrusted: the shell checks `type` and field types and renders strings with
 `textContent` only.
+
+## 6. Instance hand-over (second launch → running instance)
+
+`tidalviz PATH...` with an instance already running on the same data dir (`--home` or the default)
+sends it the paths and exits 0 without a window; the running instance switches to the `player`
+source if needed (as a `setSource` would; the shell follows) and opens them with replace
+(`Host.open_paths`, the same call the first launch makes for its own paths). The switch is for this run only: neither the files on the command line nor a hand-over change the saved `source` (only the user choosing a source in the shell does), so the next launch without files starts on the source the user last chose; a later settings change cannot save it by accident. A launch without paths
+never hands over and never refuses: a second window is still possible. Implemented in
+`tidalviz/instance.py`; `--bench` runs take no part.
+
+- **Socket.** A Unix domain socket, `<runtime dir>/tidalviz/<h>.sock`, `h` = the first 16 hex digits of
+  SHA-256 of the resolved data dir, so every data dir (and every test) has its own. The runtime dir is
+  `$XDG_RUNTIME_DIR` when it is set and absolute, else `<tmp>/tidalviz-<uid>` (macOS: the per-user
+  `$TMPDIR`); when the first would exceed 100 bytes (`sun_path` holds 104–108) the second is used.
+  The directory is created `0700`, and refused (no listener, no hand-over, normal start) unless it is
+  a directory owned by the user with no group or other permission bits; the socket is `0600`.
+- **Taking the socket.** A launch takes an exclusive `flock` on `<h>.lock` beside it and, holding it,
+  looks at the socket: absent → bind and listen; connect refused (a crashed instance's leftover) →
+  unlink and bind; accepted → a running instance (with paths: send them; without: start without a
+  listener); not a socket → left alone, start normally. Launches racing each other therefore queue on
+  the lock: exactly one binds, the others hand their files to it. A listener that accepts but does not
+  answer within 3 s counts as unreachable: the launch starts normally with its own paths.
+- **Message.** One line of JSON from the client, `{"v": 1, "paths": ["/abs/one", "/abs/two"]}` + `\n`;
+  the listener answers `ok\n` or `error\n` and closes. `ok` means received and accepted, not opened: the reply is sent before the files are handed to the host, which opens them on its own thread (a callback that takes long or fails never delays or fails the sender; a failure there reaches the shell as a `status`). Limits: 1 MiB per message, 1–1000
+  paths, each a string of at most 4096 characters that starts with `/` and holds no NUL. Anything else
+  (not JSON, wrong version, relative path, ...) gets `error\n`; a client that does not finish its line
+  within 2 s, or sends more than the limit, is dropped. One bad client never stops the listener or the
+  app, and an exception in opening the files is logged only.
+- **What the host does.** The paths go through the same `QueueControl.open(paths, replace=True)` as the
+  dialog, so the same bounds and `status` texts apply (the extension allowlist filters folder walks; a file named explicitly is judged by the preflight, as with the dialog); chosen paths that do not exist are counted in one `status` (`1 file was not found` / `N files were not found`), never named; no text sent to the shell
+  contains a path. With no GStreamer the host sends `status` "Cannot open files: the file player needs
+  GStreamer" (kept for a shell that connects later) and changes nothing. Raising or focusing the
+  window is not attempted.
+- **Late or failed opens.** A hand-over that arrives while the host is shutting down is ignored (no source is created on a stopping pipeline). If the files could not be opened (the source could not be started, an unexpected error) the shell gets the status "Could not open the chosen files".
+- **Accept errors.** An unexpected error from `accept` is logged once and retried; 50 in a row end the listener with one more log line (a later launch then finds nobody listening and starts normally); a good accept resets the count.
+- **Shutdown.** A clean exit closes the socket and removes the file.

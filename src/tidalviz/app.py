@@ -11,8 +11,10 @@ import logging
 import os
 import sys
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import unquote, urlparse
 
 from tidalviz.paths import default_root
 
@@ -37,7 +39,9 @@ def builtin_dirs() -> list[Path]:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="tidalviz", description=__doc__)
     p.add_argument("--dev", type=Path, help="plugin folder to hot-reload (enables Web Inspector)")
-    p.add_argument("--source", help="system | app:<pid> | synthetic:<kind> (this launch only)")
+    p.add_argument(
+        "--source", help="system | app:<pid> | synthetic:<kind> | player (this launch only)"
+    )
     p.add_argument("--bench", metavar="KEY", help="benchmark a visualizer and write a report")
     p.add_argument("--seconds", type=int, default=60, help="benchmark length")
     p.add_argument("--out", type=Path, default=Path("bench.json"), help="benchmark report path")
@@ -46,12 +50,64 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=Path,
         help="data dir (default: ~/Library/Application Support; Linux: $XDG_DATA_HOME or ~/.local/share)",
     )
-    return p.parse_args(argv)
+    p.add_argument(
+        "paths",
+        nargs="*",
+        metavar="PATH",
+        help="audio files or folders (or file:// URIs) to play; hands them to a running instance",
+    )
+    args = p.parse_args(argv)
+    try:
+        args.paths = [local_path(raw) for raw in args.paths]
+    except ValueError as e:
+        p.error(str(e))
+    if args.paths and args.bench is not None:
+        p.error("files cannot be given with --bench")
+    if args.paths and args.source not in (None, "player"):
+        p.error("files are played by the player source; drop --source or use --source player")
+    return args
+
+
+def local_path(raw: str) -> Path:
+    """An absolute path from a command-line argument (a path or a file:// URI), taken against the
+    working directory (only ``file://`` is a URI: ``file:foo.mp3`` is a file named that) of the process that was launched, before anything is handed over."""
+    if "://" in raw:
+        uri = urlparse(raw)
+        if uri.scheme != "file" or uri.netloc not in ("", "localhost"):
+            raise ValueError(f"not a local file: {raw!r}")
+        raw = unquote(uri.path, errors="surrogateescape")  # a non-UTF-8 name round-trips
+    if "\0" in raw:
+        raise ValueError(f"not a usable path: {raw!r}")
+    return Path(os.path.abspath(raw))
+
+
+def player_available() -> bool:
+    from tidalviz.capture import player_available as available  # numpy loads after OPENBLAS is set
+
+    return available()
+
+
+def launch_source(args: argparse.Namespace) -> str | None:
+    """The source for this launch: the player when files were given (and it can run here)."""
+    if args.source is None and args.paths and player_available():
+        return "player"
+    return args.source
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    root = args.home or default_root()
+
+    listener = None
+    if args.bench is None:  # a benchmark run must not share or take over the user's instance
+        from tidalviz.instance import acquire
+
+        got = acquire(root, args.paths or None)
+        if got.handed_over:
+            log.info("handed %d path(s) to the running instance", len(args.paths))
+            return
+        listener = got.listener
 
     import webview  # type: ignore[import-untyped]
 
@@ -68,10 +124,10 @@ def main(argv: list[str] | None = None) -> None:
     dev = args.dev is not None
     window = Window()
     host = Host(
-        root=args.home or default_root(),
+        root=root,
         builtin_dirs=builtin_dirs(),
         window=window,
-        source_id=args.source,
+        source_id=launch_source(args),
         dev=dev,
         bench_key=args.bench,
         watch_hyprland=sys.platform == "linux",  # WebKitGTK never reports hidden there
@@ -83,6 +139,16 @@ def main(argv: list[str] | None = None) -> None:
     threading.Thread(target=loop.run_forever, name="tidalviz-asyncio", daemon=True).start()
     asyncio.run_coroutine_threadsafe(host.start(), loop).result(timeout=10)
     log.info("shell %s  plugins %s", host.servers.shell_origin, host.servers.plugin_origin)
+
+    def open_paths(paths: Sequence[Path]) -> None:
+        asyncio.run_coroutine_threadsafe(host.open_paths(paths), loop).result(timeout=60)
+
+    if args.paths:
+        threading.Thread(
+            target=open_paths, args=(args.paths,), name="tidalviz-open", daemon=True
+        ).start()
+    if listener is not None:
+        listener.serve(lambda paths: open_paths(paths))
 
     win = webview.create_window(  # pyright: ignore[reportUnknownMemberType]
         "Tidalviz",
@@ -105,6 +171,8 @@ def main(argv: list[str] | None = None) -> None:
     try:
         webview.start(debug=dev)  # pyright: ignore[reportUnknownMemberType]
     finally:
+        if listener is not None:
+            listener.close()
         asyncio.run_coroutine_threadsafe(host.stop(), loop).result(timeout=10)
         loop.call_soon_threadsafe(loop.stop)
 
